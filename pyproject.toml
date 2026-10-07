@@ -14,4 +14,4 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["skills/xiaohongshu/tests"]
+testpaths = ["skills/xhs-downloader/tests"]
