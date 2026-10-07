@@ -528,6 +528,25 @@ def cover_path_for(note_dir: Path | str | None) -> Path | None:
     return found[0] if found else None
 
 
+# Below this many characters of body, the text is not enough to judge the note by.
+# Measured 2026-10-07: two of the ten notes kept for a 甘南 route question carried
+# 19 and 50 characters of body — one line of caption over a cover holding the
+# route map. A reader deciding from the text alone would have dropped both.
+SHORT_BODY_CHARS = 100
+
+
+def body_is_short(row: dict) -> bool:
+    """Whether this note's text is too thin to judge it by, so its cover matters.
+
+    Only asks about notes that were opened. An unopened candidate has no body to
+    be short — it has no body at all — and flagging it would send the reader to a
+    cover that was never downloaded.
+    """
+    if row.get("status") in (None, db.STATUS_SEEN, db.STATUS_FAILED):
+        return False
+    return len(one_line(row.get("content"))) < SHORT_BODY_CHARS
+
+
 def digest_row(index: int, row: dict, *, excerpt: int) -> list[str]:
     """One candidate as up to four lines: identity, content, cover, warnings.
 
@@ -557,6 +576,14 @@ def digest_row(index: int, row: dict, *, excerpt: int) -> list[str]:
         head += f" 编辑于{str(row['updatedAt'])[:10]}"
     if known:
         head += f"  [{known}]"
+    if body_is_short(row):
+        # The text is not enough to judge this one by, and the note knows it: the
+        # cover is often the timetable or the route map the body only names. The
+        # marker is a fact about the row, not an instruction — reading the picture
+        # is the caller's call, because a picture costs real tokens.
+        length = len(one_line(row.get("content")))
+        head += (f"  [短正文 {length} 字·看图]" if row.get("coverPath")
+                 else f"  [短正文 {length} 字·无封面]")
 
     labels = "、".join(one_line(tag, 12) for tag in (row.get("tags") or [])[:6])
     body = one_line(row.get("content"), excerpt)

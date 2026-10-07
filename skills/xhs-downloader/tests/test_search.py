@@ -798,6 +798,48 @@ def test_each_keyword_gets_its_own_opening_budget(monkeypatch, tmp_path, capsys)
         assert db.note_row(conn, NOTE_C)["status"] == db.STATUS_SCREENED
 
 
+def test_a_thin_body_is_marked_so_its_cover_gets_read() -> None:
+    """The signal the two-layer screen hangs on.
+
+    Measured 2026-10-07: two of ten notes kept for a 甘南 route question carried
+    19 and 50 characters of body — the route map was on the cover. A reader
+    judging from the text alone would have dropped both, so the row says out
+    loud that the text is not the whole note.
+    """
+    row = {"noteId": NOTE_A, "title": "甘南路线图", "content": "路线都在图里，自取",
+           "status": db.STATUS_SCREENED, "coverPath": "/tmp/xhs/cover.webp"}
+
+    assert "[短正文 9 字·看图]" in search.digest_row(1, row, excerpt=150)[0]
+
+
+def test_a_short_body_with_no_cover_says_so() -> None:
+    """No picture to read is a different fact from "there is one, go look"."""
+    row = {"noteId": NOTE_A, "title": "甘南路线图", "content": "见图",
+           "status": db.STATUS_SCREENED, "coverPath": None}
+
+    assert "[短正文 2 字·无封面]" in search.digest_row(1, row, excerpt=150)[0]
+
+
+def test_an_unopened_candidate_is_not_called_short() -> None:
+    """A candidate nobody opened has no body to be short, and its cover was
+    never downloaded — flagging it would send the reader to a missing file."""
+    row = {"noteId": NOTE_B, "title": "甘南路线图", "content": "",
+           "status": db.STATUS_SEEN, "coverPath": None}
+
+    assert "短正文" not in search.digest_row(1, row, excerpt=150)[0]
+
+
+def test_a_body_with_something_to_say_is_not_marked() -> None:
+    row = {"noteId": NOTE_A, "title": "甘南路线", "status": db.STATUS_SCREENED,
+           "content": "第一天兰州出发走夏河，第二天桑科草原转扎尕那，全程约 400 公里，"
+                      "郎木寺到扎尕那段在修路，建议早上出发。住宿建议提前订，"
+                      "旺季价格翻倍。加油点在碌曲和迭部之间比较稀，出县城前加满。"
+                      "导航信号部分路段会断，建议提前离线地图。",
+           "coverPath": "/tmp/xhs/cover.webp"}
+
+    assert "短正文" not in search.digest_row(1, row, excerpt=150)[0]
+
+
 def test_the_filters_used_are_reported(monkeypatch, site, tmp_path, capsys) -> None:
     monkeypatch.setattr(search.time, "sleep", lambda _seconds: None)
     assert run_cli(monkeypatch, site, [
