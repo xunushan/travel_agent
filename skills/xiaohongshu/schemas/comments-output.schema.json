@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://browser-use.local/schemas/xiaohongshu/comments-output.schema.json",
+  "title": "Xiaohongshu comments.json",
+  "description": "One note's comment thread, as `collect.py` and `--comments-only` write it into <noteId>/comments.json. The completeness block is part of the contract: the web view only ever renders the rows it has loaded, so a reader has to be told whether the thread was read whole, cut short on purpose, or truncated by the page. The comment container's own text is deliberately not stored — it duplicates every body at ten times the size.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "capturedAt",
+    "noteId",
+    "declaredTotal",
+    "requested",
+    "collected",
+    "repliesCollected",
+    "threadEnded",
+    "noComments",
+    "possiblyIncomplete",
+    "items",
+    "warnings"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "capturedAt": {"type": "string", "format": "date-time"},
+    "noteId": {
+      "type": "string",
+      "description": "The note this thread belongs to, so the file stands on its own."
+    },
+    "declaredTotal": {
+      "type": ["integer", "null"],
+      "description": "The \"共 N 条评论\" counter the page prints, replies included. Null when the note shows no counter."
+    },
+    "requested": {
+      "type": "integer",
+      "description": "The top-level comment budget this read was given. A read that stopped at the budget is a truncation the caller asked for, not an incomplete read."
+    },
+    "collected": {"type": "integer", "description": "Top-level comments stored."},
+    "repliesCollected": {
+      "type": "integer",
+      "description": "Every reply at every depth, over all top-level comments."
+    },
+    "threadEnded": {
+      "type": "boolean",
+      "description": "The page's own \"- THE END -\" marker was seen, which settles completeness outright."
+    },
+    "noComments": {
+      "type": "boolean",
+      "description": "The note shows its empty state — it has no comments, rather than a thread that failed to load."
+    },
+    "possiblyIncomplete": {
+      "type": "boolean",
+      "description": "True only when the read stopped before the budget for a reason the page did not explain."
+    },
+    "items": {
+      "type": "array",
+      "description": "Top-level comments, each carrying its own replies. A comment and its whole subtree count as one against `requested`.",
+      "items": {"$ref": "#/$defs/comment"}
+    },
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "comment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "author", "text", "pinned", "byAuthor", "replyCount", "replies"],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "description": "Position among its siblings, from 1. The top-level comment has no `depth`; it is what the numbered rows hang from and counts as depth 0."
+        },
+        "author": {"type": "string"},
+        "text": {"type": "string", "description": "The body, without the time/likes/reply chrome around it."},
+        "pinned": {"type": "boolean", "description": "The page marks this comment 置顶评论."},
+        "byAuthor": {"type": "boolean", "description": "The page marks this comment 作者."},
+        "replyCount": {
+          "type": "integer",
+          "description": "Size of this comment's whole reply subtree, so a thread's row count is `collected` + the sum of the top-level `replyCount`s."
+        },
+        "replies": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/reply"},
+          "description": "Direct replies. Xiaohongshu renders every reply of one comment as a flat sibling row, so this tree is rebuilt from the `回复 X ：` prefix the page prints — never from the DOM."
+        }
+      }
+    },
+    "reply": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "depth",
+        "author",
+        "text",
+        "pinned",
+        "byAuthor",
+        "replyTo",
+        "replyCount",
+        "replies"
+      ],
+      "properties": {
+        "index": {"type": "integer"},
+        "depth": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Reply levels below the comment being read: a direct reply is 1, a reply to that reply is 2."
+        },
+        "author": {"type": "string"},
+        "text": {"type": "string"},
+        "pinned": {"type": "boolean"},
+        "byAuthor": {"type": "boolean"},
+        "replyTo": {
+          "type": ["string", "null"],
+          "description": "The person this reply answers, from its `回复 X ：` prefix. Null for a direct reply to the comment itself."
+        },
+        "replyCount": {"type": "integer"},
+        "replies": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/reply"},
+          "description": "Replies to this reply, same shape all the way down."
+        }
+      }
+    }
+  }
+}

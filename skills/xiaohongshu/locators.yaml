@@ -1,0 +1,184 @@
+version: 2
+
+# Page semantics for xiaohongshu.com. Scripts read these rules and resolve live
+# refs from the current snapshot; they must not inline site selectors themselves.
+
+search:
+  result_link:
+    tag: a
+    class_contains: [cover, mask]
+    href_path_prefix: /search_result/
+    required_query_keys: [xsec_token]
+    visible: true
+    min_width: 1
+    min_height: 1
+  result_title_link:
+    tag: a
+    class_contains: [title]
+    href_path_prefix: /search_result/
+    visible: true
+  result_card:
+    tag: section
+    class_contains: [note-item]
+    visible: true
+
+detail:
+  # Any one of these being present means a note detail is on screen. A note is
+  # rendered as an overlay over the results page, or as a standalone page, or
+  # with a different container, depending on window width.
+  open_markers: [container, mask]
+  container:
+    class_contains: [note-container]
+    visible: true
+  mask:
+    class_contains: [note-detail-mask]
+    visible: true
+  # Xiaohongshu hides this button in the narrow layout, so it is only the first
+  # attempt; `dismiss_keys` below is the fallback that actually works there.
+  close_control:
+    tag: button
+    class_contains: [close-icon]
+    visible: true
+  dismiss_keys: [Escape]
+  body:
+    class_contains: [note-text]
+    visible: true
+  # --- 笔记自身的元数据（全部实测于 2026-10-07，见 PLAYBOOK 的产出字段一节）---
+  # 正文/标题/标签都长在 note-content 这一块里；标题用 h1 限定是因为推荐卡片
+  # 也有 .title。
+  note_content:
+    class_contains: [note-content]
+    visible: true
+  note_title:
+    tag: h1
+    class_contains: [title]
+    visible: true
+  # 作者块：详情页右栏顶部那个。评论作者也用 `a.name`，所以要先框定
+  # author-container，再在它里面找，否则会拿到第一条评论的作者。
+  note_author_scope:
+    class_contains: [author-container]
+    visible: true
+  note_author:
+    tag: a
+    class_contains: [name]
+    href_path_prefix: /user/profile/
+    visible: true
+  # 标签是 `a.tag`，文案形如 `#旅游`（实测 2026-10-07，6 个标签页面对上正文里的
+  # 30 个 `#话题` 完全一致）。评论里的「作者」徽标是 `span.tag`，靠 `tag: a` 排除；
+  # 作用域 note_content 再隔离一层。正文文本里的 `#话题[话题]#` 形态由 note.py 去掉标记。
+  note_tags:
+    tag: a
+    class_contains: [tag]
+    visible: true
+  # 页脚一行把「发布时间 [IP属地]」印在同一个元素里，实测四种形态：
+  # "08-01"、"09-29 河南"、"2025-11-03"（老笔记带年份）、"4天前 西藏"。
+  # 属地并非每条笔记都有，没有时该字段为 null。
+  note_footer:
+    class_contains: [bottom-container]
+    visible: true
+  note_date:
+    class_contains: [date]
+    visible: true
+  # 笔记的互动数据在评论区底部这条固定栏里（不在 note-content 里）。它和评论行
+  # 自己的 like-wrapper 同名，所以计数一律以这一条的矩形为界在内部找。
+  # 实测 6a6df219：赞 2341 / 藏 3159 / 评 610；**没有分享数元素**。
+  engage_bar:
+    class_contains: [engage-bar, interactions]
+    visible: true
+  like_count:
+    class_contains: [like-wrapper]
+  collect_count:
+    class_contains: [collect-wrapper]
+  comment_count:
+    class_contains: [chat-wrapper]
+  share_count:
+    class_contains: [share-wrapper]
+  # Scopes for `page images`, narrowest first. Multi-image posts use the slider;
+  # single-image posts have none, and the detail container is what then excludes
+  # the surrounding avatars and recommendation thumbnails.
+  image_scopes: [image_media, container]
+  image_media:
+    class_contains: [xhs-slider-container]
+    visible: true
+  video_media:
+    class_contains: [video-player-media]
+    visible: true
+  comments:
+    class_contains: [comments-container]
+    visible: true
+  # A note with no comments at all shows neither a container nor a count, only
+  # its own empty state ("这是一片荒地点击评论"). Without this a zero-comment note
+  # is indistinguishable from a thread that failed to load.
+  comments_empty:
+    class_contains: [no-comments-text]
+    visible: true
+  # Xiaohongshu nests a comment's replies INSIDE that comment's own wrapper, so
+  # the wrapper — not the flattened text — is what binds a reply to its parent.
+  # Measured on a 1440px window: comments-container x=820 w=439 contains
+  # parent-comment x=836 w=407, which in turn contains reply-container x=888
+  # w=355. A reply's innerText has the same line shape as a top-level comment's,
+  # so nesting is only recoverable from these containers.
+  comment_parent:
+    class_contains: [parent-comment]
+    visible: true
+  # A reply carries BOTH classes, so excluding `comment-item-sub` is what names
+  # the top-level comment.
+  comment_item:
+    class_contains: [comment-item]
+    class_excludes: [comment-item-sub]
+    visible: true
+  # Every comment row — top-level or reply — has exactly one
+  # `comment-inner-container`, and it is the ONLY wrapper a reply always has.
+  # `comment-item-sub` marked just the first reply of each parent (measured live:
+  # under one parent, reply 1 had `comment-item comment-item-sub` while reply 2
+  # was a bare `comment-inner-container`, so matching on `comment-item-sub`
+  # silently dropped every later reply). The caller excludes the top-level
+  # comment's own inner container, which is the only other one inside a parent.
+  comment_reply:
+    class_contains: [comment-inner-container]
+    visible: true
+  # "展开 N 条回复": collapsed replies are not in the DOM until this is clicked.
+  comment_show_more:
+    class_contains: [show-more]
+    visible: true
+  # Anchors for scrolling the thread, narrowest first. `page scroll --ref` moves
+  # the given element's NEAREST SCROLLABLE ANCESTOR, so anchoring on the comments
+  # container scrolls the note scroller without naming it. That matters:
+  # `note-scroller` itself falls out of the 500-element snapshot window once the
+  # page has moved, and then it cannot be found at all.
+  #
+  # Every anchor must sit in the RIGHT half. Scrolling the left half is the note
+  # carousel — it turns the page to the next image instead of loading comments.
+  # `body` is the last resort for a note that has just opened: the 500 slots can
+  # then be filled by the results grid and by the `...` menu every comment row
+  # carries, pushing the comments container out of reach until something moves.
+  comments_scroll_anchors: [comments, comments_scroll_target, body]
+  comments_scroll_target:
+    class_contains: [note-scroller]
+    visible: true
+
+scroll:
+  comments:
+    dy: 900
+    max_steps: 30
+    # Top-level comments to collect. A comment and all its replies count as one,
+    # so this is a comment budget, not a row budget.
+    limit: 10
+    # Cap on click-and-recheck rounds while expanding 展开 N 条回复. Every call
+    # presses one control, so this has to cover the whole run, not one screen:
+    # at 10 with a 30-comment budget the tail's folded replies stayed collapsed
+    # and the run warned about it. Keep it at least `max_steps`.
+    max_expand_rounds: 30
+    # The thread is declared finished by its own text going quiet, not by the
+    # scroller: Xiaohongshu keeps appending the next batch after the scroller
+    # reports `moved: false`, and the scroller's maximum grows with each batch
+    # (measured on one note: 3281 -> 5509 -> 6964 -> 7938 while `moved` was
+    # already False). So the loop stops after this many consecutive rounds in
+    # which the container text gained no rows.
+    max_idle_rounds: 4
+    # Element ceiling for snapshots taken while reading comments, in place of
+    # the CLI's 500. One comment row is about twenty elements, so 500 exposes
+    # only the first ~22 rows of a long thread and the tail is unreachable
+    # however far the page is scrolled. A 66-row thread measured on
+    # 69fad4b5 needs roughly 1400; 3000 leaves room for the surrounding page.
+    snapshot_limit: 3000

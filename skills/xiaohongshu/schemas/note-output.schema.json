@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://browser-use.local/schemas/xiaohongshu/note-output.schema.json",
+  "title": "Xiaohongshu note.json",
+  "description": "One note, as `collect.py` writes it into <noteId>/note.json. Everything here is content an agent reads; how the note was collected (tab, media URLs, download state) lives in downloads.json beside it, and the thread in comments.json. A field the page does not print is null rather than absent, so a missing IP location or share count is distinguishable from a collector that forgot to look.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "capturedAt",
+    "noteId",
+    "url",
+    "title",
+    "type",
+    "author",
+    "authorId",
+    "ipLocation",
+    "publishedAt",
+    "stats",
+    "tags",
+    "content",
+    "warnings"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "capturedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the collection ran (UTC)."
+    },
+    "noteId": {
+      "type": ["string", "null"],
+      "description": "The note's ID, parsed from the URL."
+    },
+    "url": {
+      "type": "string",
+      "description": "The page URL verbatim, query string included — the access token in it is what makes the link reusable."
+    },
+    "title": {"type": "string"},
+    "type": {"enum": ["image", "video"]},
+    "author": {
+      "type": ["string", "null"],
+      "description": "Null only in a file migrated from the pre-v2 layout, whose collector never stored the author; the warning in the file says so."
+    },
+    "authorId": {
+      "type": ["string", "null"],
+      "description": "The numeric profile id in the author's /user/profile/<id> link."
+    },
+    "ipLocation": {
+      "type": ["string", "null"],
+      "description": "The IP location the footer prints after the date, e.g. \"河南\". Null when the note prints none."
+    },
+    "publishedAt": {
+      "type": ["string", "null"],
+      "description": "Publish time decoded from the first 8 hex digits of the note ID, in +08:00. The printed date (\"08-01\", \"4天前\") cannot be placed on a calendar on its own, so it is not stored."
+    },
+    "stats": {
+      "type": "object",
+      "description": "The interaction bar. The web detail view has no share element at all, so `shares` is null on every note seen so far.",
+      "additionalProperties": false,
+      "required": ["likes", "collects", "comments", "shares"],
+      "properties": {
+        "likes": {"type": ["integer", "null"]},
+        "collects": {"type": ["integer", "null"]},
+        "comments": {"type": ["integer", "null"]},
+        "shares": {"type": ["integer", "null"]}
+      }
+    },
+    "tags": {
+      "type": ["array", "null"],
+      "items": {"type": "string"},
+      "description": "Topic names without the #/[话题] markers the page prints around them. Null only in a file migrated from the pre-v2 layout, which stored no tags."
+    },
+    "content": {
+      "type": "string",
+      "description": "The note body as plain text."
+    },
+    "warnings": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Problems worth reporting, including a one-line summary per unfinished download (the detail is in downloads.json)."
+    }
+  }
+}

@@ -1,0 +1,17 @@
+[project]
+name = "travel-agent"
+version = "0.1.0"
+description = "采集与整理旅行原始素材的站点 skill"
+requires-python = ">=3.10"
+# 站点脚本自己只用标准库加 PyYAML（locators.yaml）；驱动浏览器靠 chrome-agent 的 CLI，
+# 所以这里不依赖 chrome_agent 包。
+dependencies = ["PyYAML>=6.0"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "jsonschema>=4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["skills/xiaohongshu/tests"]

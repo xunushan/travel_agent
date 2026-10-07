@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+.DS_Store
+*.bak
+*.orig
+
+# 采集产出：落在调用方指定的目录，不进仓库
+outputs/
