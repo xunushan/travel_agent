@@ -40,6 +40,16 @@ python "$SITE/scripts/search.py" filters --tab-id <tab-id>
 `search.py run` 自己会导航到结果页，所以「run 之后接着 filters」总是安全的；手工开的 tab
 要先自己搜一次。
 
+**第一次用、或刚改过 `locators.yaml` 时先小跑一次自检**：
+
+```bash
+python "$SITE/scripts/search.py" run --tab-id <tab-id> \
+  --keywords "<一个词>" --filters "<一个筛选>" --limit 1 --screen-limit 1 --no-screen
+```
+
+`--no-screen` 只抓卡片不开页面，一条就够验三件事：搜索页渲染等到了、筛选真的施加上了
+（末尾会打「已施加筛选」）、卡片规则还认得出来。这一步几十秒，比正式跑一轮到一半崩掉便宜。
+
 ### 1.2 一轮搜索
 
 ```bash
