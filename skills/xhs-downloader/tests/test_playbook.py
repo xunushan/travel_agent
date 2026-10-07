@@ -19,6 +19,8 @@ import media  # noqa: E402
 import migrate  # noqa: E402
 import note  # noqa: E402
 import runtime  # noqa: E402
+import search  # noqa: E402
+import state  # noqa: E402
 from discover import close_detail_if_open, open_result  # noqa: E402
 from runtime import load_locators, note_id  # noqa: E402
 
@@ -35,9 +37,15 @@ def patch_browser(monkeypatch, browser) -> None:
     Each module binds `chrome_agent` at import time (`from runtime import
     chrome_agent`), so patching `runtime` alone would leave the copies held by
     `comments`, `media` and `discover` pointing at the real CLI.
+
+    A module that instead imports `runtime`'s wrappers (`state` takes `snapshot`
+    and `extract_text`) holds no binding of its own — those wrappers look up
+    `chrome_agent` in `runtime`'s namespace at call time, so patching `runtime`
+    already covers it. `raising=False` is what lets one tuple list both kinds
+    instead of making every caller know which module is which.
     """
-    for module in (batch, discover, runtime, comments, media):
-        monkeypatch.setattr(module, "chrome_agent", browser)
+    for module in (batch, discover, runtime, comments, media, search, state):
+        monkeypatch.setattr(module, "chrome_agent", browser, raising=False)
 
 
 def element(ref: str, **kwargs: object) -> dict:
@@ -184,6 +192,56 @@ def test_note_id_reads_every_url_shape(url) -> None:
 )
 def test_note_id_ignores_non_note_urls(url, expected) -> None:
     assert note_id(url) is expected
+
+
+# --- geometry ---------------------------------------------------------------
+
+
+def box(x: float, y: float, width: float, height: float) -> dict:
+    return {"rect": {"x": x, "y": y, "width": width, "height": height}}
+
+
+def test_containment_is_strict_by_default_but_takes_the_site_s_own_rounding() -> None:
+    """Measured on the live filter panel (2026-10-07).
+
+    The `发布时间` group's box is 71px tall while the option row inside it ends a
+    pixel lower. Strict containment lost that whole group — the only recency
+    filter the page has — so geometry-grouping callers pass a couple of pixels of
+    slack. The default stays strict because the comment tree uses the same
+    helper to tell two rows apart, where slack could adopt a sibling.
+    """
+    group = box(980, 380, 420, 71)
+    row = box(980, 412, 420, 40)
+
+    assert not runtime.contains_rect(group, row)
+    assert runtime.contains_rect(group, row, 2)
+
+    # Slack must not let a group swallow its neighbour: measured gap between two
+    # option groups is 16px.
+    neighbour = box(980, 468, 420, 71)
+    assert not runtime.contains_rect(group, neighbour, 2)
+    # A child sticking out on the top-left is outside too, slack or not.
+    assert not runtime.contains_rect(group, box(900, 300, 420, 40), 2)
+
+
+def test_the_channel_row_rule_ignores_the_sites_own_side_nav(config) -> None:
+    """The left nav's `span.channel` entries are 18px tall, the row's buttons are
+    40px. Without a height floor the rule matched both, and `filters` listed
+    发现/RED/直播/发布/通知/消息/我 as note-type options (measured 2026-10-07)."""
+    rule = config["search"]["filter_channels"]
+    button = {
+        "tag": "div", "className": "channel", "text": "图文",
+        "rect": {"x": 331, "y": 88, "width": 64, "height": 40},
+        "states": {"visible": True},
+    }
+    nav = {
+        "tag": "span", "className": "channel", "text": "发现",
+        "rect": {"x": 68, "y": 103, "width": 32, "height": 18},
+        "states": {"visible": True},
+    }
+
+    assert runtime.matches(button, rule)
+    assert not runtime.matches(nav, rule)
 
 
 # --- closing an open detail -------------------------------------------------
@@ -1077,15 +1135,21 @@ def test_collect_note_writes_the_three_files(monkeypatch, tmp_path) -> None:
 
     assert set(note_payload) == {
         "schemaVersion", "capturedAt", "noteId", "url", "title", "type", "author",
-        "authorId", "ipLocation", "publishedAt", "stats", "tags", "content", "warnings",
+        "authorId", "ipLocation", "publishedAt", "updatedAt", "capturedFrom",
+        "stats", "tags", "content", "warnings",
     }
     assert note_payload["content"] == "徒步雀儿山主峰冰川的正文"
     assert note_payload["warnings"] == []
+    # This fixture's page carries no state script, so it is a DOM read and the
+    # fields only the state answers are null.
+    assert note_payload["capturedFrom"] == "dom"
+    assert note_payload["updatedAt"] is None
 
     downloads = json.loads((note_dir / "downloads.json").read_text())
     assert downloads["source"] == {"tabId": 1, "url": NOTE_URL, "title": "笔记"}
     assert downloads["content"] == {"length": 12, "truncated": False}
     assert downloads["images"] == [] and downloads["downloads"] == []
+    assert downloads["skipped"] == 0
 
     written = json.loads((note_dir / "comments.json").read_text())
     assert written["noteId"] == note_id(NOTE_URL)
@@ -1205,7 +1269,8 @@ def test_a_legacy_note_becomes_the_current_shape(tmp_path) -> None:
     note_payload = json.loads((directory / "note.json").read_text())
     assert list(note_payload) == [
         "schemaVersion", "capturedAt", "noteId", "url", "title", "type", "author",
-        "authorId", "ipLocation", "publishedAt", "stats", "tags", "content", "warnings",
+        "authorId", "ipLocation", "publishedAt", "updatedAt", "capturedFrom",
+        "stats", "tags", "content", "warnings",
     ]
     assert note_payload["content"] == "川西的秋天"
     assert note_payload["url"].endswith(f"/explore/{NOTE}?xsec_token=token")

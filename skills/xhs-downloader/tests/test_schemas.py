@@ -11,6 +11,7 @@ present.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -135,15 +136,19 @@ def test_the_comment_file_carries_no_source(collected) -> None:
     assert set(payload) == set(DOCS["comments-output.schema.json"]["properties"])
 
 
-REAL_NOTES = Path("/Users/isuntaiyang/Documents/travel_agent/川西秋色/03-原始笔记_v2")
+REAL_NOTES = Path(
+    os.environ.get("XHS_TEST_NOTES", Path.home() / "Documents/travel_agent/notes")
+)
 
 
 def test_a_real_collection_matches_too() -> None:
     """The fixture above is written to fit the contract; a real run is not.
 
-    Notes collected before this layout existed carry `schemaVersion` 1 and are
-    left as they are, so only a version-2 note is checked here — and this test
-    only starts saying anything once one exists.
+    One collection is machine-local: nothing guarantees a checkout has ever run
+    against a live browser, so this skips when the directory is absent. Files
+    written by an older layout are skipped rather than checked — each file is
+    validated against the contract version it declares, which is what keeps a
+    newer schema from retroactively condemning yesterday's output.
     """
     files = {
         "note-output.schema.json": "note.json",
@@ -157,12 +162,12 @@ def test_a_real_collection_matches_too() -> None:
             if not path.is_file():
                 continue
             payload = json.loads(path.read_text(encoding="utf-8"))
-            if payload.get("schemaVersion") != 2:
+            if payload.get("schemaVersion") != DOCS[name]["properties"]["schemaVersion"]["const"]:
                 continue
             check(DOCS[name], payload, DOCS[name], path=str(path))
             checked += 1
     if not checked:
-        pytest.skip(f"尚无 schemaVersion 2 的产出可校验（{REAL_NOTES}）")
+        pytest.skip(f"尚无当前版本的产出可校验（{REAL_NOTES}）")
 
 
 def test_a_missing_jsonschema_only_costs_a_deeper_check(collected) -> None:
