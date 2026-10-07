@@ -3,8 +3,10 @@
 旅行素材的采集与整理。每个站点一个 skill，放在 `skills/<站点>/`。
 
 站点 skill 不实现浏览器能力：它假定 `chrome-agent` 命令可用（CLI + daemon + 已加载的扩展），
-只通过它的 `--json` 输出驱动浏览器。浏览器这一侧出问题，去 [browser_use](https://github.com/xunushan/browser_use)
-那个仓库（chrome-agent skill 本身）查。
+只通过它的 `--json` 输出驱动浏览器。浏览器这一侧出问题，去 [chrome-agent](https://github.com/xunushan/chrome-agent)
+那个仓库查。
+
+站点 skill 由哪些文件组成、每个文件里必须有什么，见 [docs/site-skill-spec.md](docs/site-skill-spec.md)。
 
 ## skills/xiaohongshu
 
