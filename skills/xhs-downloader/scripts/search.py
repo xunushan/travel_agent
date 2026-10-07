@@ -659,6 +659,26 @@ def plan_row(item: dict, stored: dict | None, decision: str | None) -> dict:
     return row
 
 
+def group_header(group: dict, *, limit: int) -> str:
+    """One keyword's section header, carrying what that keyword lost.
+
+    The counts are the keyword's own, never the run's: a round covering two
+    keywords used to print one line for both, so a keyword whose pool had been
+    cut looked exactly like a keyword that had been searched thoroughly.
+    """
+    head = f"--- 「{group['keyword']}」{group['candidates']} 候选"
+    if group["capped"]:
+        head += f"（页面上还有更多，已取到 --limit {limit}）"
+    head += f" · 打开 {group['fresh']}"
+    if group["cached"]:
+        head += f" · 库里已有 {group['cached']}"
+    if group["deferred"]:
+        head += f" · 未展开 {group['deferred']}"
+    if group["duplicates"]:
+        head += f" · 与前面的关键词重复 {group['duplicates']}"
+    return head
+
+
 def run_phase_one(args, config: dict) -> int:
     keywords = split_items(args.keywords)
     if not keywords:
@@ -684,25 +704,45 @@ def run_phase_one(args, config: dict) -> int:
                       "excerpt": args.excerpt, "noScreen": args.no_screen},
             )
 
-        candidates: list[dict] = []
+        # One keyword is one round: its own cards, its own opening budget, its own
+        # section. A budget shared across keywords is what let one keyword's pool
+        # be cut off entirely by another's — measured in run 2 of 2026-10-07: 26
+        # cards under two keywords, and `--screen-limit 15` spent on the first
+        # keyword left the second keyword's 11 candidates untouched, reported as
+        # one anonymous "未展开 11 条" that named neither the keyword nor the loss.
+        groups: list[dict] = []
+        claimed: dict[str, str] = {}
         applied: list[dict] = []
         for keyword in keywords:
             outcome = run_search(args.tab_id, config, keyword, specs)
             page = outcome["page"]
-            for item in discover.discover(page, config, max(1, args.limit)):
+            ceiling = max(1, args.limit)
+            found = discover.discover(page, config, ceiling + 1)
+            # Asking for one card past the ceiling is how the run learns the page
+            # had more to give. The total is not readable anywhere, so the extra
+            # card is the evidence, and the report says "还有更多" instead of a
+            # number it would have to invent.
+            capped = len(found) > ceiling
+            items, duplicates = [], 0
+            for item in found[:ceiling]:
                 item["keyword"] = keyword
                 item["cardTime"] = card_time(page, config, item)
-                candidates.append(item)
+                if not item["noteId"]:
+                    continue
+                if item["noteId"] in claimed:
+                    # The same note can rank under two keywords. It stays with
+                    # the keyword that found it first; the later one counts it
+                    # rather than opening a second copy.
+                    duplicates += 1
+                    continue
+                claimed[item["noteId"]] = keyword
+                items.append(item)
+            groups.append({"keyword": keyword, "items": items, "candidates": len(items),
+                           "capped": capped, "duplicates": duplicates,
+                           "applied": outcome["applied"]})
             applied = outcome["applied"] or applied
 
-        # The same note can rank under two keywords. The first mention wins,
-        # which keeps the rank the reader saw highest.
-        unique: dict[str, dict] = {}
-        for item in candidates:
-            if item["noteId"] and item["noteId"] not in unique:
-                unique[item["noteId"]] = item
-        candidates = list(unique.values())
-
+        candidates = [item for group in groups for item in group["items"]]
         decisions = {item["note_id"]: item["decision"] for item in db.run_items(conn, run_id)}
         db.add_run_items(
             conn,
@@ -713,45 +753,55 @@ def run_phase_one(args, config: dict) -> int:
         known = db.known_notes(conn, [item["noteId"] for item in candidates])
         db.mark_seen(conn, list(known))
 
-        rows, failures, fresh, deferred = [], [], 0, 0
-        budget = args.screen_limit if not args.no_screen and args.screen_limit > 0 else None
-        for item in candidates:
-            stored = known.get(item["noteId"])
-            if args.no_screen or stored or (budget is not None and fresh >= budget):
-                # Listed but not opened. Counted apart from the ones the index
-                # already covers, because the two call for opposite reactions:
-                # this one is "raise --screen-limit", that one is "nothing to do".
-                if not args.no_screen and not stored:
-                    deferred += 1
-                rows.append(plan_row(item, stored, decisions.get(item["noteId"])))
-                continue
-            result = screen_note(
-                args.tab_id, config, item, notes_root=notes_root, prefix=args.prefix,
-                timeout=args.open_timeout,
-            )
-            fresh += 1
-            if result["error"]:
-                failures.append(f"{item['noteId']}: {result['error']}")
-                row = plan_row(item, None, None)
-                row["status"] = db.STATUS_FAILED
-                row["newWarnings"] = [result["error"]]
+        for group in groups:
+            # The budget is per keyword, so each keyword gets the reader's full
+            # attention however many keywords the round holds.
+            budget = args.screen_limit if not args.no_screen and args.screen_limit > 0 else None
+            rows, failures, fresh, deferred, cached = [], [], 0, 0, 0
+            for item in group["items"]:
+                stored = known.get(item["noteId"])
+                if args.no_screen or stored or (budget is not None and fresh >= budget):
+                    # Listed but not opened. Counted apart from the ones the index
+                    # already covers, because the two call for opposite reactions:
+                    # this one is "raise --screen-limit", that one is "nothing to do".
+                    if not args.no_screen and not stored:
+                        deferred += 1
+                    else:
+                        cached += 1
+                    rows.append(plan_row(item, stored, decisions.get(item["noteId"])))
+                    continue
+                result = screen_note(
+                    args.tab_id, config, item, notes_root=notes_root, prefix=args.prefix,
+                    timeout=args.open_timeout,
+                )
+                fresh += 1
+                if result["error"]:
+                    failures.append(f"{item['noteId']}: {result['error']}")
+                    row = plan_row(item, None, None)
+                    row["status"] = db.STATUS_FAILED
+                    row["newWarnings"] = [result["error"]]
+                    rows.append(row)
+                    continue
+                row = row_from_screening(result)
+                row["decision"] = db.DECISION_PENDING
+                db.store_note(
+                    conn,
+                    result["note"],
+                    note_dir=result["noteDir"],
+                    excerpt=one_line(result["note"].get("content"), 600) or None,
+                    status=db.STATUS_SCREENED,
+                    media=screening_media(row),
+                )
                 rows.append(row)
-                continue
-            row = row_from_screening(result)
-            row["decision"] = db.DECISION_PENDING
-            db.store_note(
-                conn,
-                result["note"],
-                note_dir=result["noteDir"],
-                excerpt=one_line(result["note"].get("content"), 600) or None,
-                status=db.STATUS_SCREENED,
-                media=screening_media(row),
-            )
-            rows.append(row)
-            if args.interval:
-                time.sleep(args.interval)
+                if args.interval:
+                    time.sleep(args.interval)
+            group.update(rows=rows, failures=failures, fresh=fresh, deferred=deferred,
+                         cached=cached)
         conn.commit()
 
+        rows = [row for group in groups for row in group["rows"]]
+        failures = [failure for group in groups for failure in group["failures"]]
+        fresh = sum(group["fresh"] for group in groups)
         kept = sum(1 for row in rows if row.get("decision") == db.DECISION_KEEP)
         dropped = sum(1 for row in rows if row.get("decision") == db.DECISION_DROP)
         filters_text = "；".join(
@@ -759,18 +809,34 @@ def run_phase_one(args, config: dict) -> int:
             for spec in specs
         )
         print(f"=== run {run_id} · {';'.join(keywords)}"
-              f"{' · ' + filters_text if filters_text else ''} · {len(rows)} 候选 ===")
-        for index, row in enumerate(rows, start=1):
-            for line in digest_row(index, row, excerpt=args.excerpt):
-                print(line)
+              f"{' · ' + filters_text if filters_text else ''}"
+              f" · {len(keywords)} 个关键词 · {len(rows)} 候选 ===")
+        index = 0
+        for group in groups:
+            print(group_header(group, limit=args.limit))
+            for row in group["rows"]:
+                index += 1
+                for line in digest_row(index, row, excerpt=args.excerpt):
+                    print(line)
         summary = (
-            f"{len(candidates)} 张卡片 → 打开 {fresh} · 库里已有 {len(known)}"
+            f"{sum(group['candidates'] for group in groups)} 张卡片 → 打开 {fresh}"
+            f" · 库里已有 {len(known)}"
             f"(keep {kept}/drop {dropped}/待定 {len(rows) - kept - dropped})"
             f" · 正文与封面在 {notes_root}"
         )
-        if deferred:
-            summary += f" · 因 --screen-limit {args.screen_limit} 未展开 {deferred} 条"
         print(f"=== {summary} ===")
+        cut = [group for group in groups if group["deferred"] or group["duplicates"]]
+        if cut:
+            # Which keyword lost what, in the open. "未展开 11 条" without a name
+            # reads as a rounding detail; it was an entire keyword's pool.
+            print("--- 没看全的部分 ---")
+            for group in cut:
+                parts = []
+                if group["deferred"]:
+                    parts.append(f"到上限没打开 {group['deferred']} 条")
+                if group["duplicates"]:
+                    parts.append(f"与前面的关键词重复 {group['duplicates']} 条")
+                print(f"    「{group['keyword']}」{'、'.join(parts)}")
         if applied:
             print("已施加筛选：" + "、".join(
                 f"{item['dimension']}={item['option']}({item['via']})" for item in applied
@@ -780,8 +846,16 @@ def run_phase_one(args, config: dict) -> int:
             for failure in failures:
                 print(f"    ! {failure}")
         print(f"下一步：decide.py keep|drop --run-id {run_id} --note-id <id> --reason \"...\"")
-        db.finish_run(conn, run_id, totals={"candidates": len(rows), "opened": fresh,
-                                           "failed": len(failures)})
+        db.finish_run(conn, run_id, totals={
+            "candidates": len(rows), "opened": fresh, "failed": len(failures),
+            "keywords": [
+                {"keyword": group["keyword"], "candidates": group["candidates"],
+                 "opened": group["fresh"], "cached": group["cached"],
+                 "deferred": group["deferred"], "duplicates": group["duplicates"],
+                 "capped": group["capped"]}
+                for group in groups
+            ],
+        })
     return 0
 
 
@@ -825,9 +899,10 @@ def main() -> int:
     run_parser.add_argument("--tab-id", required=True, type=int)
     run_parser.add_argument("--keywords", help='分号分隔的搜索词，如 "川西秋色;稻城亚丁 秋"（不重复传）')
     run_parser.add_argument("--filters", help='分号分隔的筛选，如 "排序依据=最新;半年内"；维度可省，歧义报错')
-    run_parser.add_argument("--limit", type=int, default=20, help="每个搜索词最多取多少张卡片")
-    run_parser.add_argument("--screen-limit", type=int, default=20,
-                            help="本次最多打开多少篇做初筛（0 = 不限）")
+    run_parser.add_argument("--limit", type=int, default=10,
+                            help="每个搜索词最多取多少张卡片（默认 10：一段搜索词给出十来条就够判断该不该换词）")
+    run_parser.add_argument("--screen-limit", type=int, default=10,
+                            help="每个搜索词最多打开多少篇做初筛（默认 10；0 = 不限）")
     run_parser.add_argument("--excerpt", type=int, default=150, help="摘要里正文截断字数")
     run_parser.add_argument("--no-screen", action="store_true", help="只出卡片表，不逐篇抓取")
     run_parser.add_argument("--run-id", type=int, help="并入已有的 run（默认新建）")

@@ -46,14 +46,17 @@ python "$SITE/scripts/search.py" filters --tab-id <tab-id>
 python "$SITE/scripts/search.py" run --tab-id <tab-id> \
   --keywords "川西秋色;稻城亚丁 秋" \
   --filters "排序依据=最新;半年内" \
-  --limit 20 --screen-limit 20 --excerpt 150
+  --limit 10 --screen-limit 10 --excerpt 150
 ```
 
 - `--keywords` / `--filters` 都是**一个参数、分号分隔**，不重复传。`--filters` 每项是
   `维度=选项`，维度可省（`"半年内"`）；同维度匹配到多个候选时**报错而不是猜**。
 - 脚本对每个搜索词：整页导航 → 轮询等结果渲染（实测 >14s，默认超时 45s）→ **逐项点筛选并
   验证生效** → 再抓卡片。
-- 然后按 `--screen-limit` 逐条打开候选，抽 SSR 状态 + 正文 + 一张封面，落盘并入库。
+- 然后按 `--screen-limit` **逐词**打开候选，抽 SSR 状态 + 正文 + 一张封面，落盘并入库。
+  两个配额都是**每个搜索词各算一份**：`--limit 10 --screen-limit 10` 配两个关键词，
+  是每个词各取 10 张卡片、各打开 10 篇。输出按词分成小节，每节标出这个词自己
+  取了多少、开了多少、剩下多少没打开。
   **不读评论、不下图集与视频**——这是阶段一便宜的根本原因。
 - 库里已有的候选直接列出来不重开（`[已筛过:keep|drop]` / `[已下载]`），所以同一轮重跑很便宜。
 

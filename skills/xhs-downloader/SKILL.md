@@ -41,7 +41,7 @@ python "$SITE/scripts/search.py" filters --tab-id <tab>
 # ② 一轮搜索：施加筛选 → 等渲染 → 抓候选 → 批量初筛 → 打一张摘要表
 python "$SITE/scripts/search.py" run --tab-id <tab> \
   --keywords "川西秋色;稻城亚丁 秋" --filters "排序依据=最新;半年内" \
-  --limit 20 --screen-limit 20 --excerpt 150          # 打印 run id
+  --limit 10 --screen-limit 10 --excerpt 150          # 两个上限按词各算一份；打印 run id
 
 # ③ 记判断（只写库，不抓页面；一次可记多条）
 python "$SITE/scripts/decide.py" keep --run-id 7 --note-id <id>,<id> --reason "有时间表和机位"

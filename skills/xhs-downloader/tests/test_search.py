@@ -758,8 +758,44 @@ def test_screen_limit_caps_how_many_pages_get_opened(monkeypatch, site, tmp_path
 
     out = capsys.readouterr().out
     assert "打开 1" in out
-    assert "--screen-limit 1 未展开 1 条" in out
+    # The keyword that lost a candidate is named, and so is the count.
+    assert "「川西秋色」2 候选 · 打开 1 · 未展开 1" in out
+    assert "「川西秋色」到上限没打开 1 条" in out
     assert f"{NOTE_B}" in out          # still listed, just not opened
+
+
+def test_each_keyword_gets_its_own_opening_budget(monkeypatch, tmp_path, capsys) -> None:
+    """The loss this was written for, measured in run 2 of 2026-10-07.
+
+    Two keywords, 26 candidates, `--screen-limit 15`: the first keyword spent the
+    whole budget, the second keyword's 11 candidates were never opened, and one
+    summary line reported "未展开 11 条" with no keyword attached. The budget is
+    per keyword now, so a keyword is not cut short by the keyword before it.
+    """
+    site = FakeSite(
+        keywords={
+            "川西秋色": [(NOTE_A, "川西赏秋时间表", "09-27"), (NOTE_B, "川西环线", "09-20")],
+            "稻城亚丁 秋": [(NOTE_C, "稻城亚丁", "09-18")],
+        },
+        notes={
+            NOTE_A: note_page(NOTE_A, title="川西赏秋时间表", body="10月中下旬开始，川西进入最佳观赏期。"),
+            NOTE_B: note_page(NOTE_B, title="川西环线", body="第一天成都出发。"),
+            NOTE_C: note_page(NOTE_C, title="稻城亚丁", body="十月是稻城最好的季节。"),
+        },
+        tmp_path=tmp_path,
+    )
+    monkeypatch.setattr(search.time, "sleep", lambda _seconds: None)
+    assert run_cli(monkeypatch, site, [
+        "run", "--tab-id", "1", "--keywords", "川西秋色;稻城亚丁 秋",
+        "--screen-limit", "1", *data_args(tmp_path),
+    ]) == 0
+
+    out = capsys.readouterr().out
+    assert "「川西秋色」2 候选 · 打开 1 · 未展开 1" in out
+    # The second keyword opens its own candidate: 1 each, not 1 in total.
+    assert "「稻城亚丁 秋」1 候选 · 打开 1" in out
+    with db.open_db(database_of(tmp_path)) as conn:
+        assert db.note_row(conn, NOTE_C)["status"] == db.STATUS_SCREENED
 
 
 def test_the_filters_used_are_reported(monkeypatch, site, tmp_path, capsys) -> None:
