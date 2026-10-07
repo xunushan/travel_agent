@@ -444,20 +444,11 @@ def card_time(page: dict, config: dict, candidate: dict) -> str | None:
     slot is used, and the card's own text — whose LAST time-shaped token is the
     time (title, author, time, likes) — covers a slot that two cards share.
     """
-    rules = config["search"]
-    element = next(
-        (item for item in page.get("elements", []) if item.get("ref") == candidate.get("ref")),
-        None,
-    )
-    if not element:
+    card = card_of(page, config, candidate)
+    if not card or not cards_are_tellable(page, config):
         return None
-    cards = find_all(page, rules["result_card"])
-    card = next((item for item in cards if contains_rect(item, element)), None)
-    if not card:
-        return None
-    if len({_rect_key(item)[:2] for item in cards}) < len(cards):
-        return None
-    for slot in _inside(page, card, rules["card_time"]):
+    cards = find_all(page, config["search"]["result_card"])
+    for slot in _inside(page, card, config["search"]["card_time"]):
         if sum(1 for item in cards if contains_rect(item, slot)) > 1:
             break
         match = CARD_TIME_RE.search(_text(slot))
@@ -465,6 +456,52 @@ def card_time(page: dict, config: dict, candidate: dict) -> str | None:
             return match.group(0)
     matches = CARD_TIME_RE.findall(_text(card))
     return matches[-1] if matches else None
+
+
+def card_of(page: dict, config: dict, candidate: dict) -> dict | None:
+    """The card element holding this candidate's link, as far as the page can say."""
+    element = next(
+        (item for item in page.get("elements", []) if item.get("ref") == candidate.get("ref")),
+        None,
+    )
+    if not element:
+        return None
+    return next(
+        (item for item in find_all(page, config["search"]["result_card"])
+         if contains_rect(item, element)),
+        None,
+    )
+
+
+def cards_are_tellable(page: dict, config: dict) -> bool:
+    """Whether a card can be told from its neighbours by its rectangle.
+
+    On the 最新 sort it cannot: all thirty cards reported the same origin
+    (x=267 y=217) with differing heights, so every card's rectangle contains
+    every other card's link and the first one that matches is arbitrary.
+    """
+    cards = find_all(page, config["search"]["result_card"])
+    return len({_rect_key(item)[:2] for item in cards}) == len(cards)
+
+
+# Two different facts wear the same `?`: no card could be identified, and a card
+# whose text carries no time at all.
+CARD_TIME_UNREADABLE = "本页卡片矩形重叠，读不出"
+
+
+def card_note(page: dict, config: dict, candidate: dict, limit: int = 40) -> str | None:
+    """What to show instead of a time, when there is no time.
+
+    Where the cards cannot be told apart, no fallback can be honest: the card
+    that "contains" this candidate is arbitrary, so its text is another note's
+    author and time. Saying so is worth more than printing them. Where the cards
+    ARE separable, the card's own text (title, author, time, likes) is a usable
+    fallback for a human to read the time out of.
+    """
+    if not cards_are_tellable(page, config):
+        return CARD_TIME_UNREADABLE
+    card = card_of(page, config, candidate)
+    return one_line(_text(card), limit) if card else None
 
 
 # --- screening one candidate ------------------------------------------------
@@ -576,6 +613,11 @@ def digest_row(index: int, row: dict, *, excerpt: int) -> list[str]:
         head += f" 编辑于{str(row['updatedAt'])[:10]}"
     if known:
         head += f"  [{known}]"
+    if row.get("cardTime") is None and row.get("cardNote"):
+        # The time column shows `?` either way; this says which `?` it is.
+        note = row["cardNote"]
+        head += (f"  [{note}]" if note == CARD_TIME_UNREADABLE
+                 else f"  [卡片: {note}]")
     if body_is_short(row):
         # The text is not enough to judge this one by, and the note knows it: the
         # cover is often the timetable or the route map the body only names. The
@@ -624,6 +666,7 @@ def row_from_index(row: dict, candidate: dict | None = None) -> dict:
         "excerptKind": row["excerpt_kind"],
         "status": row["status"],
         "cardTime": (candidate or {}).get("cardTime"),
+        "cardNote": (candidate or {}).get("cardNote"),
         "coverPath": cover_path_for(row["note_dir"]),
     }
 
@@ -647,6 +690,7 @@ def row_from_screening(result: dict) -> dict:
         "excerptKind": excerpt_kind,
         "status": db.STATUS_SCREENED,
         "cardTime": candidate.get("cardTime"),
+        "cardNote": candidate.get("cardNote"),
         "coverPath": cover_path_for(result["noteDir"]),
         "newWarnings": note.get("warnings") or [],
         "facts": facts,
@@ -695,6 +739,7 @@ def plan_row(item: dict, stored: dict | None, decision: str | None) -> dict:
             "content": "",
             "status": db.STATUS_SEEN,
             "cardTime": item.get("cardTime"),
+            "cardNote": item.get("cardNote"),
             "coverPath": None,
         }
     row["decision"] = decision or db.DECISION_PENDING
@@ -769,6 +814,8 @@ def run_phase_one(args, config: dict) -> int:
             for item in found[:ceiling]:
                 item["keyword"] = keyword
                 item["cardTime"] = card_time(page, config, item)
+                if item["cardTime"] is None:
+                    item["cardNote"] = card_note(page, config, item)
                 if not item["noteId"]:
                     continue
                 if item["noteId"] in claimed:

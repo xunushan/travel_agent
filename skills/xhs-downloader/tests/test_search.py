@@ -404,6 +404,37 @@ def test_each_card_keeps_its_own_time_when_the_rects_separate_them() -> None:
     assert search.card_time(page, config, {"ref": "title1"}) == "2小时前"
 
 
+def test_no_time_says_which_kind_of_no_time_it_is() -> None:
+    """Where the cards cannot be told apart, no fallback would be honest.
+
+    The card that "contains" a candidate's link is arbitrary there, so printing
+    its text would print another note's author and time as if they were this
+    one's. The table says so instead.
+    """
+    config = runtime.load_locators()
+    overlapping = card_page([
+        element("card0", tag="section", className="note-item",
+                text="甘南小环线超全攻略 皮皮日记 3分钟前 12", rect=rect(267, 217, 230, 300)),
+        element("title0", className="title", text="甘南小环线超全攻略", rect=rect(267, 460, 230, 20)),
+        element("card1", tag="section", className="note-item",
+                text="甘南环线第二站 小甲 2小时前 5", rect=rect(267, 217, 230, 340)),
+        element("title1", className="title", text="甘南环线第二站", rect=rect(267, 490, 230, 20)),
+    ])
+    assert search.card_note(overlapping, config, {"ref": "title0"}) == search.CARD_TIME_UNREADABLE
+
+    separated = card_page([
+        element("card0", tag="section", className="note-item",
+                text="甘南小环线超全攻略 皮皮日记 3分钟前 12", rect=rect(960, 400, 230, 300)),
+        element("title0", className="title", text="甘南小环线超全攻略", rect=rect(960, 600, 230, 20)),
+        element("card1", tag="section", className="note-item",
+                text="甘南环线第二站 小甲 2小时前 5", rect=rect(960, 760, 230, 300)),
+        element("title1", className="title", text="甘南环线第二站", rect=rect(960, 960, 230, 20)),
+    ])
+    # Distinguishable: the reader gets the card's own words and can pick the time out.
+    assert search.card_note(separated, config, {"ref": "title0"}) == (
+        "甘南小环线超全攻略 皮皮日记 3分钟前 12")
+
+
 # --- reading the panel -----------------------------------------------------
 
 
