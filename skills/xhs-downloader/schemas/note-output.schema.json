@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://browser-use.local/schemas/xiaohongshu/note-output.schema.json",
   "title": "Xiaohongshu note.json",
-  "description": "One note, as `collect.py` writes it into <noteId>/note.json. Everything here is content an agent reads; how the note was collected (tab, media URLs, download state) lives in downloads.json beside it, and the thread in comments.json. A field the page does not print is null rather than absent, so a missing IP location or share count is distinguishable from a collector that forgot to look.",
+  "description": "One note, as `collect.py` writes it into <noteId>/note.json. Everything here is content an agent reads; how the note was collected (tab, media URLs, download state) lives in downloads.json beside it, and the thread in comments.json. A field that neither source prints is null rather than absent, so a missing IP location or update time is distinguishable from a collector that forgot to look.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -16,13 +16,15 @@
     "authorId",
     "ipLocation",
     "publishedAt",
+    "updatedAt",
+    "capturedFrom",
     "stats",
     "tags",
     "content",
     "warnings"
   ],
   "properties": {
-    "schemaVersion": {"const": 2},
+    "schemaVersion": {"const": 3},
     "capturedAt": {
       "type": "string",
       "format": "date-time",
@@ -52,11 +54,19 @@
     },
     "publishedAt": {
       "type": ["string", "null"],
-      "description": "Publish time decoded from the first 8 hex digits of the note ID, in +08:00. The printed date (\"08-01\", \"4天前\") cannot be placed on a calendar on its own, so it is not stored."
+      "description": "Publish time, in +08:00. Taken from the state's own `time` when the state was readable, otherwise decoded from the first 8 hex digits of the note ID. The printed date (\"08-01\", \"4天前\") cannot be placed on a calendar on its own, so it is never the source."
+    },
+    "updatedAt": {
+      "type": ["string", "null"],
+      "description": "Last edit time, in +08:00, from the state's `lastUpdateTime`. This is the primary evidence for whether a stored copy of the note is stale. It equals `publishedAt` on a note that was never edited (measured on 6a6df219), and it is null when the state could not be read — the page prints the day a note was edited (\"编辑于 2025-09-24\") but never the second, so the DOM cannot supply it either."
+    },
+    "capturedFrom": {
+      "enum": ["state", "dom"],
+      "description": "Which source the metadata block came from. `state` is the page's server-rendered store, `dom` the selectors in locators.yaml. A `dom` read is not wrong, but it carries no `updatedAt` and no share count, so it is worth knowing which one produced a thin file."
     },
     "stats": {
       "type": "object",
-      "description": "The interaction bar. The web detail view has no share element at all, so `shares` is null on every note seen so far.",
+      "description": "The interaction bar. `shares` is filled from the state's `interactInfo.shareCount` and is null only on a DOM-only read — the web detail view has no share element at all.",
       "additionalProperties": false,
       "required": ["likes", "collects", "comments", "shares"],
       "properties": {

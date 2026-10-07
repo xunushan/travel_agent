@@ -6,7 +6,9 @@ rule is resolved against the current snapshot at call time.
 
 from __future__ import annotations
 
+import argparse
 import json
+import os
 import re
 import subprocess
 import time
@@ -15,7 +17,25 @@ from urllib.parse import parse_qs, urlparse
 
 import yaml
 
-PLAYBOOK_DIR = Path(__file__).resolve().parents[1]
+SKILL_DIR = Path(__file__).resolve().parents[1]
+
+# Where a collection lands when nothing says otherwise. One root holds the notes
+# and the index together so a run can be moved or deleted as a unit.
+DEFAULT_DATA_ROOT = Path.home() / "Documents" / "travel_agent"
+DATA_ROOT_ENV = "XHS_DATA_ROOT"
+NOTES_DIRNAME = "notes"
+DB_FILENAME = "xhs.db"
+
+# The one definition of a search URL, shared by `batch.py` and `search.py` so a
+# two-phase run searches the same page it later downloads from. `source` and
+# `type` are what the site's own results page sends; they are NOT filters and
+# changing them does not change the sort or the note type — measured 2026-10-07,
+# adding `sort=`/`noteType=` here left the server-rendered `searchContext` at
+# `general`/`0`. See `references/filters.md`.
+SEARCH_URL_TEMPLATE = (
+    "https://www.xiaohongshu.com/search_result"
+    "?keyword={keyword}&source=web_search_result_notes&type=51"
+)
 
 NOTE_ID_RE = re.compile(r"/(?:explore|search_result|discovery/item)/([0-9a-f]{24})")
 
@@ -80,8 +100,71 @@ def note_id(url: str | None) -> str | None:
 
 
 def load_locators() -> dict:
-    with (PLAYBOOK_DIR / "locators.yaml").open(encoding="utf-8") as source:
+    with (SKILL_DIR / "locators.yaml").open(encoding="utf-8") as source:
         return yaml.safe_load(source)
+
+
+def data_root(cli_value: str | Path | None = None) -> Path:
+    """Resolve the directory a run's notes and database live under.
+
+    Precedence is `--data-root`, then `$XHS_DATA_ROOT`, then
+    `~/Documents/travel_agent` — the CLI wins over the environment so a one-off
+    run can be redirected without unsetting what the session is configured with.
+    Returned unresolved-but-expanded: `~` in a CLI value has to work, and the
+    path is printed in reports, where the user's own spelling reads better than
+    a canonical one. Nothing is created here.
+    """
+    value = cli_value or os.environ.get(DATA_ROOT_ENV) or DEFAULT_DATA_ROOT
+    return Path(value).expanduser()
+
+
+def notes_dir(root: str | Path, cli_value: str | Path | None = None) -> Path:
+    """Where the note directories go: `<root>/notes/<noteId>/` unless overridden."""
+    if cli_value:
+        return Path(cli_value).expanduser()
+    return Path(root) / NOTES_DIRNAME
+
+
+def db_path(root: str | Path, cli_value: str | Path | None = None) -> Path:
+    """Where the index lives: `<root>/xhs.db` unless `--db` names another file."""
+    if cli_value:
+        return Path(cli_value).expanduser()
+    return Path(root) / DB_FILENAME
+
+
+def add_data_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add the two storage flags every entry point accepts.
+
+    One helper rather than four copies: the flags have to mean the same thing in
+    `search.py`, `decide.py`, `batch.py` and `collect.py`, or a phase-one run
+    writes an index that phase two cannot find.
+    """
+    parser.add_argument(
+        "--data-root",
+        type=Path,
+        help=f"Notes and database root (default: ${DATA_ROOT_ENV} or {DEFAULT_DATA_ROOT})",
+    )
+    parser.add_argument(
+        "--db",
+        type=Path,
+        help=f"Index file (default: <data-root>/{DB_FILENAME})",
+    )
+
+
+WHITESPACE_RE = re.compile(r"\s+")
+
+
+def one_line(text: object, limit: int | None = None) -> str:
+    """Collapse whitespace — cards and bodies carry newlines — and optionally cut.
+
+    Cutting is always at the end and marked, because an excerpt that stops
+    mid-sentence without saying so reads as a truncated note rather than a
+    truncated view of one.
+    """
+    collapsed = WHITESPACE_RE.sub(" ", str(text or "")).strip()
+    if limit is not None and len(collapsed) > limit:
+        return collapsed[: limit - 1] + "…"
+    return collapsed
 
 
 def snapshot(tab_id: int, limit: int | None = None) -> dict:
@@ -148,6 +231,40 @@ def deduplicate(items: list[dict], key: str = "url") -> list[dict]:
         seen.add(value)
         output.append(item)
     return output
+
+
+def media_name(url: str | None) -> str:
+    """A media file's stable identity: its host plus its file name.
+
+    The CDN re-signs every URL on every read, and the signature is a path segment
+    in front of the file name. Measured 2026-10-07, ONE picture of one note:
+
+        …/202610071719/259fbf23…/1040g2sg31igk0d22085g4a6gt97n16m17s9uko0!nd_dft_wlteh_webp_3
+        …/202610071730/61550091…/1040g2sg31igk0d22085g4a6gt97n16m17s9uko0!nd_dft_wlteh_webp_3
+
+    Two URLs, one picture; the `!nd_dft_…` tail is the CDN's encoding request
+    rather than part of the id. Only the id is stable, so only the id may decide
+    "already downloaded" — comparing whole URLs makes every refresh fetch every
+    picture again and land it beside the first copy as `-2`, `-3`, …
+
+    The host stays IN. Two files of different kinds can share a name
+    (`sns-webpic…/1040g3aaa.webp` against a video of the same name), and the two
+    errors are not equally bad: calling one file two costs a duplicate download,
+    which is visible and recoverable, while calling two files one silently drops
+    a picture. Where the choice is between those, this errs toward the download.
+
+    **Idempotent by contract**: `media_name(media_name(u)) == media_name(u)`. The
+    index stores names and re-reads them through this function, so a second pass
+    that stripped the host would turn every stored `host/file` into `file` and
+    make two different files look like one.
+    """
+    text = (url or "").strip()
+    if "//" not in text:
+        # Already a name, in either the stored `host/file` form or bare `file`.
+        return text
+    parts = urlparse(text)
+    tail = (parts.path or "").rstrip("/").rsplit("/", 1)[-1].split("!", 1)[0]
+    return f"{parts.netloc}/{tail}" if parts.netloc and tail else ""
 
 
 def tab_source(tab_id: int) -> dict:
@@ -219,13 +336,25 @@ def find_open_detail(page: dict, config: dict) -> dict | None:
     return None
 
 
-def contains_rect(container: dict, child: dict) -> bool:
+def contains_rect(container: dict, child: dict, tolerance: float = 0.0) -> bool:
+    """Whether `child` sits inside `container`'s rectangle.
+
+    `tolerance` is not a fudge factor for sloppy rules, it is there because the
+    site rounds its own boxes. Measured on the search filter panel (2026-10-07):
+    the `发布时间` group's own box is 71px tall while the option row inside it
+    ends ONE pixel lower, so strict containment dropped the entire group — and
+    with it the only recency filter the page has. Callers that group by geometry
+    pass a pixel or two of slack; callers that separate two rows of the same
+    list (the comment tree) keep the strict default, where slack could adopt a
+    sibling. Hiding this inside a global default would have quietly loosened
+    those too.
+    """
     outer, inner = container.get("rect") or {}, child.get("rect") or {}
     return (
-        outer.get("x", 0) <= inner.get("x", 0)
-        and outer.get("y", 0) <= inner.get("y", 0)
-        and outer.get("x", 0) + outer.get("width", 0)
+        outer.get("x", 0) - tolerance <= inner.get("x", 0)
+        and outer.get("y", 0) - tolerance <= inner.get("y", 0)
+        and outer.get("x", 0) + outer.get("width", 0) + tolerance
         >= inner.get("x", 0) + inner.get("width", 0)
-        and outer.get("y", 0) + outer.get("height", 0)
+        and outer.get("y", 0) + outer.get("height", 0) + tolerance
         >= inner.get("y", 0) + inner.get("height", 0)
     )

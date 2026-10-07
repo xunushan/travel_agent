@@ -15,7 +15,7 @@ import shutil
 import time
 from pathlib import Path
 
-from runtime import chrome_agent, deduplicate, find_first, snapshot
+from runtime import chrome_agent, deduplicate, find_first, media_name, snapshot
 
 # Never note content: author avatars, static UI assets, vector icons, and the
 # pictures people attach to their comments.
@@ -137,18 +137,16 @@ def discover_note_images(
         time.sleep(2)
 
 
-def unique_destination(directory: Path, filename: str) -> Path:
-    candidate = directory / filename
-    stem, suffix = candidate.stem, candidate.suffix
-    index = 2
-    while candidate.exists():
-        candidate = directory / f"{stem}-{index}{suffix}"
-        index += 1
-    return candidate
-
-
 def organize_downloads(downloads: list[dict], directory: Path, warnings: list[str]) -> None:
-    """Move only files confirmed as downloaded in this collection run."""
+    """Move only files confirmed as downloaded in this collection run.
+
+    An existing file of the same name is REPLACED, not sidestepped. Chrome names
+    each download `<prefix>-<index>.<ext>`, so re-collecting a note produces the
+    same names, and the older `-2`/`-3` suffixes turned every retry into another
+    copy of the same picture. Overwriting is the truthful behaviour for an
+    archive that describes the note as it is now; the previous copies are what
+    the `media` table in the database is for.
+    """
     directory.mkdir(parents=True, exist_ok=True)
     for item in downloads:
         if item.get("state") != DOWNLOAD_STATE_COMPLETE or not item.get("filename"):
@@ -157,10 +155,80 @@ def organize_downloads(downloads: list[dict], directory: Path, warnings: list[st
         if not source.is_file():
             warnings.append(f"下载完成但找不到文件，未归档：{source}")
             continue
-        destination = unique_destination(directory, source.name)
+        destination = directory / source.name
         shutil.move(str(source), destination)
         item["originalFilename"] = str(source)
         item["filename"] = str(destination)
+
+
+def collect_cover(
+    tab_id: int,
+    config: dict,
+    *,
+    note_dir: Path,
+    prefix: str,
+    fallback: str | None = None,
+) -> dict:
+    """Download just the note's first picture, as `images/cover.<ext>`.
+
+    Phase 1 hands the agent a file path per candidate instead of the image, and
+    that first picture is often the information rather than the decoration — the
+    measured candidates carry timetables, route maps and viewpoint lists on
+    their covers. So it is worth having on disk; whether to look at it stays the
+    agent's call, because reading an image costs real tokens.
+
+    It is deliberately NOT taken from the state's `imageList`: `--url` is a
+    whitelist over what `page images` discovered in a scope, so a URL the DOM
+    never produced would match nothing. The carousel is discovered the same way
+    the archive discovers it, and its first slide is the cover.
+
+    The returned `src` is the URL that was discovered, which is what the caller
+    records in the index. A caller comparing picture sets across runs has to key
+    on the same URL the DOM produces, or a redirect inside the browser's own
+    download would make an untouched note look like it had swapped pictures.
+    `images` is the whole discovery, not just the slide that was fetched: phase
+    one records every URL as belonging to this note, so that a later run with
+    pictures to download does not read the rest of them as newly added.
+    """
+    warnings: list[str] = []
+    scope, images, _ = discover_note_images(tab_id, config, fallback)
+    if not scope or not images:
+        warnings.append("未找到笔记首图，未能落封面")
+        return {"src": None, "images": [], "downloads": [], "warnings": warnings}
+
+    cover = images[0]
+    downloads = chrome_agent(
+        "page",
+        "download-images",
+        "--tab-id",
+        str(tab_id),
+        "--ref",
+        scope,
+        "--prefix",
+        prefix,
+        "--url",
+        cover["src"],
+    ).get("downloads", [])
+    if not any(item.get("state") == DOWNLOAD_STATE_COMPLETE for item in downloads):
+        warnings.append("封面下载未完成")
+        return {"src": cover["src"], "images": images, "downloads": downloads, "warnings": warnings}
+
+    # One file per note, always the same name: this is a screening aid, so the
+    # second run replaces the first rather than adding `-2`.
+    directory = note_dir / "images"
+    directory.mkdir(parents=True, exist_ok=True)
+    for item in downloads:
+        if item.get("state") != DOWNLOAD_STATE_COMPLETE or not item.get("filename"):
+            continue
+        source = Path(item["filename"])
+        if not source.is_file():
+            warnings.append(f"封面下载完成但找不到文件：{source}")
+            continue
+        destination = directory / f"cover{source.suffix}"
+        shutil.move(str(source), destination)
+        item["originalFilename"] = str(source)
+        item["filename"] = str(destination)
+    return {"src": cover["src"], "images": images, "downloads": downloads, "warnings": warnings}
 
 
 def collect_media(
@@ -173,6 +241,7 @@ def collect_media(
     download_images: bool,
     download_media: bool,
     fallbacks: dict[str, str | None] | None = None,
+    skip_urls: set[str] | None = None,
 ) -> dict:
     """Discover this note's media, download what was asked for, and report it.
 
@@ -180,8 +249,12 @@ def collect_media(
     regions are resolved from the snapshot taken right after the note opened,
     and the elements that sit at a positive on-screen position — the carousel
     among them — are the ones a long thread pushes out of a capped snapshot.
+
+    `skip_urls` are images already on disk according to the database; they are
+    left out of the whitelist so a refresh downloads only what changed.
     """
     fallbacks = fallbacks or {}
+    skip_urls = skip_urls or set()
     warnings: list[str] = []
     images: list[dict] = []
     images_ref: str | None = None
@@ -204,12 +277,19 @@ def collect_media(
         )
         audio_video = deduplicate(scoped_media + page_media)
 
+    # Compared by picture name, not by URL: the CDN re-signs every URL on every
+    # read, so a URL-only comparison sees a fresh picture every time and lands a
+    # second copy of it beside the first as `-2`.
+    pending = [
+        image for image in images
+        if media_name(image["src"]) not in skip_urls
+    ]
     downloads: list[dict] = []
     if download_images and images_ref and not images:
         warnings.append("未识别出笔记原图，已拒绝下载小图/表情/评论配图/页面资源")
     if download_images and not images_ref:
         warnings.append("未找到图片容器（detail.image_scopes 都没匹配上）")
-    if download_images and images and images_ref:
+    if download_images and pending and images_ref:
         # `--url` is the whitelist. Without it the extension falls back to every
         # image it discovered in the scope, which is how avatars, emoji and
         # recommendation thumbnails end up in the output.
@@ -217,7 +297,7 @@ def collect_media(
             "page", "download-images", "--tab-id", str(tab_id), "--ref", images_ref,
             "--prefix", prefix,
         ]
-        for image in images:
+        for image in pending:
             command.extend(["--url", image["src"]])
         image_downloads = chrome_agent(*command).get("downloads", [])
         organize_downloads(image_downloads, note_dir / "images", warnings)
@@ -249,6 +329,8 @@ def collect_media(
         "images": images,
         "audioVideo": audio_video,
         "downloads": downloads,
+        # Discovered but already on disk, so deliberately not fetched again.
+        "skipped": len(images) - len(pending),
         "warnings": warnings,
     }
 

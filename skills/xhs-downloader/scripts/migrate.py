@@ -24,7 +24,9 @@ from note import published_at
 NOTE_FILENAME = "note.json"
 COMMENTS_FILENAME = "comments.json"
 DOWNLOADS_FILENAME = "downloads.json"
-SCHEMA_VERSION = 2
+# Tracks `collect.SCHEMA_VERSION` for note.json and downloads.json alike. The
+# thread has its own version and is written as whatever it already is.
+SCHEMA_VERSION = 3
 
 # Every title the old collector stored came from the browser tab and carries the
 # site's own suffix (all 33 notes of one collection end with it), while today's
@@ -136,6 +138,9 @@ def migrate_note_dir(note_dir: Path) -> dict:
             "images": media.get("images", []),
             "audioVideo": media.get("audioVideo", []),
             "downloads": media.get("downloads", []),
+            # The old collector never recorded skipped discoveries; there were
+            # none, because it had no idea what was already on disk.
+            "skipped": 0,
             "warnings": media.get("warnings", []),
         },
     )
@@ -157,6 +162,10 @@ def migrate_note_dir(note_dir: Path) -> dict:
             "authorId": None,
             "ipLocation": None,
             "publishedAt": note.get("publishedAt") or published_at(note_id_value),
+            # Neither is recoverable from an old file: nothing back then read the
+            # page's state, and an edit time is not in the note ID.
+            "updatedAt": None,
+            "capturedFrom": "dom",
             "stats": {"likes": None, "collects": None, "comments": None, "shares": None},
             "tags": None,
             "content": text,

@@ -21,6 +21,59 @@ search:
     tag: section
     class_contains: [note-item]
     visible: true
+  # 卡片自己那一行：作者名 + 模糊发布时间 + 点赞数，实测形如
+  # '川西晚秋🏔️…飞奔的熊大😉4天前48'——三个值在同一个卡片里，只有 `div.time`
+  # 是时间。卡片**不含更新时间**，所以按更新时间判重必须打开笔记之后才能做。
+  card_time:
+    class_contains: [time]
+    visible: true
+  # --- 筛选控件（全部实测于 2026-10-07，见 references/filters.md）---
+  # 笔记类型是常驻的 channel 行，不需要打开任何弹层；其余四组在弹层里。
+  # 同名的「笔记类型」在弹层里也有一份（不限/视频/图文），但「用户」只在 channel 行，
+  # 所以 `--filters 笔记类型=图文` 走 channel（少一次点击），只有 channel 没有的选项才开弹层。
+  # `min_height` 是必需的：左侧竖排导航（发现/RED/直播/发布/通知/消息/我）的 span 也带
+  # `channel` 类，但只有 18px 高，而这一行是 40px 的按钮（实测 2026-10-07：混进来会让
+  # `filters` 列出七个不存在的「笔记类型」选项，也可能把导航的高亮误判成生效筛选）。
+  filter_channels:
+    class_contains: [channel]
+    visible: true
+    min_height: 24
+  filter_channel_active:
+    class_contains: [channel, active]
+    visible: true
+  # 「筛选」入口，弹层的开关。它和 channel 行同在 y=88 那一行。
+  filter_control:
+    class_contains: [filter]
+    visible: true
+  filter_panel:
+    class_contains: [filter-panel]
+    visible: true
+  # 一组筛选：`div.filters` 里是一个标签 span 加一个 `div.tag-container`。
+  filter_group:
+    class_contains: [filters]
+    visible: true
+  filter_group_label:
+    tag: span
+    visible: true
+  filter_tag_container:
+    class_contains: [tag-container]
+    visible: true
+  # 一个选项。选中态就是在同一个 div 上加 `active`，没有别的标记。
+  # 每个选项在快照里会出现两次（同样的文本、同样的矩形、不同的 ref），
+  # 所以任何遍历都必须按矩形去重，否则同一次点击会被当成两个选项。
+  filter_option:
+    class_contains: [tags]
+    visible: true
+  filter_option_active:
+    class_contains: [tags, active]
+    visible: true
+  # 弹层底部只有「重置」和「收起」，**没有「确定」**——点击即生效。
+  filter_reset:
+    class_contains: [operation]
+    visible: true
+  filter_operations:
+    class_contains: [operation-container]
+    visible: true
 
 detail:
   # Any one of these being present means a note detail is on screen. A note is
@@ -43,7 +96,8 @@ detail:
   body:
     class_contains: [note-text]
     visible: true
-  # --- 笔记自身的元数据（全部实测于 2026-10-07，见 PLAYBOOK 的产出字段一节）---
+  # --- 笔记自身的元数据（全部实测于 2026-10-07；各字段的来源与边界见
+  #     references/pitfalls.md 第 19 条。这里是 SSR 状态拿不到时的 DOM 兜底。）---
   # 正文/标题/标签都长在 note-content 这一块里；标题用 h1 限定是因为推荐卡片
   # 也有 .title。
   note_content:
@@ -158,6 +212,19 @@ detail:
     visible: true
 
 scroll:
+  search:
+    # 搜索结果卡片不是随文档一起出现的。同一次观测：6s → 0 张卡片，14s → 仍 0 张，
+    # 更晚 → 25 张 `section.note-item`。`discover.py` 拿到快照就返回，不等待，
+    # 这就是「搜不到结果」类故障的来源，所以 `search.py run` 自己轮询。
+    render_timeout: 45      # 秒；等到至少一张 `result_card` 出现，超时报错而不是返回空表
+    poll_interval: 1.5
+    # 点完一个筛选选项后结果要重排。实测点「最新」后卡片全换，但换完需要几秒。
+    filter_settle: 3
+    # 结果页快照的元素上限。默认 500 **不够**：实测 2026-10-07 搜「甘南环线」时
+    # matched=711，截断点正好落在「发布时间」组中间，于是面板看起来只有
+    # 「不限/一天内」，`--filters 半年内` 会报「没有选项「半年内」」——而那个选项就在
+    # 屏幕上。卡片加载得越多越容易踩到。见 references/pitfalls.md 第 6 条。
+    snapshot_limit: 2000
   comments:
     dy: 900
     max_steps: 30

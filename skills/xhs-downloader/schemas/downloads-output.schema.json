@@ -5,9 +5,9 @@
   "description": "The verification file `collect.py` writes into <noteId>/downloads.json: what was discovered, what was asked for, and where each file landed. It exists so a download can be checked without re-running the collection — none of it is note content, which is why it is not in note.json. A download succeeded only when `state` is \"complete\" and `filename` is present; a discovered URL proves nothing was fetched.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "capturedAt", "source", "content", "images", "audioVideo", "downloads", "warnings"],
+  "required": ["schemaVersion", "capturedAt", "source", "content", "images", "audioVideo", "downloads", "skipped", "warnings"],
   "properties": {
-    "schemaVersion": {"const": 2},
+    "schemaVersion": {"const": 3},
     "capturedAt": {"type": "string", "format": "date-time"},
     "source": {
       "type": "object",
@@ -88,6 +88,10 @@
           "timedOut": {"type": "boolean"}
         }
       }
+    },
+    "skipped": {
+      "type": "integer",
+      "description": "Discoveries left alone because the database already had them on disk. Non-zero explains an otherwise puzzling empty `downloads` list on a re-run, and `images` still lists them — this is the count of what was deliberately NOT fetched."
     },
     "warnings": {"type": "array", "items": {"type": "string"}}
   }
