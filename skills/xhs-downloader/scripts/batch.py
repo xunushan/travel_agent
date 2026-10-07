@@ -488,11 +488,13 @@ def collect_all(args, config, conn, entries, output_root, requested) -> int:
                     seen = media_rows(verification, known_files)
                     if db.media_urls_changed(conn, note_id, [row["url"] for row in seen]):
                         record["mediaChanged"] = True
+                    excerpt, excerpt_kind = db.excerpt_of(note.get("content"))
                     db.store_note(
                         conn,
                         note,
                         note_dir=note_dir,
-                        excerpt=one_line(note.get("content"), 600) or None,
+                        excerpt=excerpt,
+                        excerpt_kind=excerpt_kind,
                         status=db.STATUS_COLLECTED,
                         media=seen,
                     )

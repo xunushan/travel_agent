@@ -25,13 +25,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from runtime import media_name
+from runtime import media_name, one_line
 
 # The database's own shape, independent of the note files'. `note-output`'s
 # schemaVersion tracks what `note.json` looks like; this tracks the tables. A
@@ -39,7 +40,11 @@ from runtime import media_name
 # file from an older build — is refused rather than migrated, because the ledger
 # can always be rebuilt by re-running phase one while a half-migrated one cannot
 # be trusted to say what was already judged.
-SCHEMA_VERSION = 1
+#
+# 2: `notes.excerpt_kind` (what the excerpt is: full body, a cut one, a tag pile,
+#    or nothing). Databases at version 1 are refused, not migrated — the notes
+#    on disk are unaffected and the ledger is rebuilt by re-running phase one.
+SCHEMA_VERSION = 2
 
 # Note lifecycle in `notes.status`: the latest thing known about a note, across
 # all runs. `run_items.decision` is the per-run record; this is the summary that
@@ -103,6 +108,7 @@ CREATE TABLE IF NOT EXISTS notes (
     schema_version    INTEGER,
     note_dir          TEXT,
     excerpt           TEXT,
+    excerpt_kind      TEXT,   -- full | truncated | tags-only | empty
     first_seen_at     TEXT NOT NULL,
     last_seen_at      TEXT NOT NULL,
     last_screened_at  TEXT,
@@ -217,6 +223,53 @@ def open_db(path: str | Path) -> Iterator[sqlite3.Connection]:
 
 def as_dict(row: sqlite3.Row | None) -> dict | None:
     return dict(row) if row is not None else None
+
+
+# --- the screening excerpt -------------------------------------------------
+
+EXCERPT_LIMIT = 600
+EXCERPT_FULL = "full"            # the whole body fits
+EXCERPT_TRUNCATED = "truncated"  # cut at the limit
+EXCERPT_TAGS_ONLY = "tags-only"  # nothing but hashtags — the note is its pictures
+EXCERPT_EMPTY = "empty"          # a body that was read and is empty
+
+TRAILING_TAGS_RE = re.compile(r"(?:\s*#[^\s#]+)+\s*$")
+
+
+def strip_trailing_tags(text: str) -> str:
+    """Drop the hashtag block a body ends with.
+
+    Measured 2026-10-07 on the 13 notes then in the index: 4 had bodies under 100
+    characters and every one of them was mostly tags — one 19-character body was
+    exactly `#甘南旅游 #自驾游旅游 #自由行旅游`, 88 characters were 12 tags plus the
+    words `自驾攻略 路况轿车`. A screening excerpt full of tags reads as if the
+    note said something about 甘南旅游 when it said nothing at all.
+
+    Only the TRAILING run goes. A `#` inside a sentence is prose ("第3天#桑科草原
+    扎营"), and cutting those would lose text a reader wants.
+    """
+    return TRAILING_TAGS_RE.sub("", text)
+
+
+def excerpt_of(content: str | None, limit: int = EXCERPT_LIMIT) -> tuple[str | None, str | None]:
+    """The screening excerpt for a body, and what kind of excerpt it is.
+
+    Returns `(text, kind)`. `content` of `None` means this read did not look at
+    the body — a media- or comment-only run — and returns `(None, None)` so both
+    columns keep what they had rather than recording "no text" as a fact.
+
+    The kind is the part a later phase reads instead of opening `note.json`:
+    `tags-only` and `empty` say the note carries no prose at all, which is why its
+    pictures matter; `full` says the excerpt is the whole body; `truncated` warns
+    that something was cut.
+    """
+    if content is None:
+        return None, None
+    text = one_line(strip_trailing_tags(content))
+    if not text:
+        return None, EXCERPT_TAGS_ONLY if content.strip() else EXCERPT_EMPTY
+    kind = EXCERPT_FULL if len(text) <= limit else EXCERPT_TRUNCATED
+    return one_line(text, limit), kind
 
 
 # --- content identity ------------------------------------------------------
@@ -375,6 +428,7 @@ def store_note(
     *,
     note_dir: str | Path | None = None,
     excerpt: str | None = None,
+    excerpt_kind: str | None = None,
     status: str | None = None,
     media: Iterable[dict] | None = None,
     stamp: str | None = None,
@@ -430,6 +484,7 @@ def store_note(
         "schema_version": note.get("schemaVersion"),
         "note_dir": str(note_dir) if note_dir else None,
         "excerpt": excerpt,
+        "excerpt_kind": excerpt_kind,
         "seen": stamp,
     }
     conn.execute(
@@ -437,13 +492,13 @@ def store_note(
         INSERT INTO notes (note_id, url, title, author, author_id, type,
             published_at, updated_at, updated_at_source, tags_json,
             likes, collects, comment_count, shares, content_hash, content_len,
-            media_count, status, schema_version, note_dir, excerpt,
+            media_count, status, schema_version, note_dir, excerpt, excerpt_kind,
             first_seen_at, last_seen_at, last_screened_at)
         VALUES (:note_id, :url, :title, :author, :author_id, :type,
             :published_at, :updated_at, :updated_at_source, :tags_json,
             :likes, :collects, :comment_count, :shares, :content_hash, :content_len,
             :media_count, COALESCE(:status, 'seen'), :schema_version, :note_dir,
-            :excerpt, :seen, :seen,
+            :excerpt, :excerpt_kind, :seen, :seen,
             CASE WHEN :status IS NOT NULL AND :status != 'seen' THEN :seen END)
         ON CONFLICT(note_id) DO UPDATE SET
             url            = COALESCE(excluded.url, notes.url),
@@ -466,6 +521,7 @@ def store_note(
             schema_version = COALESCE(excluded.schema_version, notes.schema_version),
             note_dir       = COALESCE(excluded.note_dir, notes.note_dir),
             excerpt        = COALESCE(excluded.excerpt, notes.excerpt),
+            excerpt_kind   = COALESCE(excluded.excerpt_kind, notes.excerpt_kind),
             last_seen_at   = excluded.last_seen_at,
             last_screened_at = CASE
                 WHEN :status IS NOT NULL AND :status != 'seen'

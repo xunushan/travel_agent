@@ -582,8 +582,15 @@ def digest_row(index: int, row: dict, *, excerpt: int) -> list[str]:
         # marker is a fact about the row, not an instruction — reading the picture
         # is the caller's call, because a picture costs real tokens.
         length = len(one_line(row.get("content")))
-        head += (f"  [短正文 {length} 字·看图]" if row.get("coverPath")
-                 else f"  [短正文 {length} 字·无封面]")
+        if row.get("excerptKind") in (db.EXCERPT_TAGS_ONLY, db.EXCERPT_EMPTY):
+            # Nothing but hashtags, so the character count would read as "short"
+            # when the truth is "none". Measured 2026-10-07: `#甘南旅游 #自驾游旅游
+            # #自由行旅游` is a 19-character body of pure tags.
+            label = "无正文·只有标签" if row["excerptKind"] == db.EXCERPT_TAGS_ONLY else "无正文"
+        else:
+            label = f"短正文 {length} 字"
+        head += (f"  [{label}·看图]" if row.get("coverPath")
+                 else f"  [{label}·无封面]")
 
     labels = "、".join(one_line(tag, 12) for tag in (row.get("tags") or [])[:6])
     body = one_line(row.get("content"), excerpt)
@@ -612,6 +619,9 @@ def row_from_index(row: dict, candidate: dict | None = None) -> dict:
                   "comments": row["comment_count"], "shares": row["shares"]},
         "tags": json.loads(row["tags_json"]) if row["tags_json"] else [],
         "content": row["excerpt"] or "",
+        # What kind of excerpt the index holds, so a note with no prose is not
+        # mistaken for one whose prose is merely short.
+        "excerptKind": row["excerpt_kind"],
         "status": row["status"],
         "cardTime": (candidate or {}).get("cardTime"),
         "coverPath": cover_path_for(row["note_dir"]),
@@ -620,6 +630,10 @@ def row_from_index(row: dict, candidate: dict | None = None) -> dict:
 
 def row_from_screening(result: dict) -> dict:
     note, candidate, facts = result["note"], result["candidate"], result["facts"]
+    # The excerpt is computed here, once, and both the row and the database take
+    # it from here — a table that says "无正文" while the index says nothing would
+    # make the marker and the record disagree.
+    excerpt, excerpt_kind = db.excerpt_of(note.get("content"))
     return {
         "noteId": note.get("noteId") or candidate.get("noteId"),
         "title": note.get("title"),
@@ -629,7 +643,8 @@ def row_from_screening(result: dict) -> dict:
         "updatedAt": note.get("updatedAt"),
         "stats": note.get("stats") or {},
         "tags": note.get("tags") or [],
-        "content": note.get("content") or "",
+        "content": excerpt or "",
+        "excerptKind": excerpt_kind,
         "status": db.STATUS_SCREENED,
         "cardTime": candidate.get("cardTime"),
         "coverPath": cover_path_for(result["noteDir"]),
@@ -815,7 +830,8 @@ def run_phase_one(args, config: dict) -> int:
                     conn,
                     result["note"],
                     note_dir=result["noteDir"],
-                    excerpt=one_line(result["note"].get("content"), 600) or None,
+                    excerpt=row["content"] or None,
+                    excerpt_kind=row["excerptKind"],
                     status=db.STATUS_SCREENED,
                     media=screening_media(row),
                 )

@@ -42,7 +42,8 @@
 | `status` | 见下方状态机 | 阶段一/二 | 到处 |
 | `schema_version` | `note.json` 的形状版本（**不是表结构**） | 阶段一 | `migrate.py` |
 | `note_dir` | 这篇在盘上的目录 | 阶段一/二 | 找封面、找文件 |
-| `excerpt` | 正文前 600 字 | 阶段一/二 | 摘要表、库内复用 |
+| `excerpt` | 正文**去掉尾部 tag 段**后的前 600 字；正文只有 tag 时为 NULL | 阶段一/二 | 摘要表、库内复用 |
+| `excerpt_kind` | `full`（全文都在）/ `truncated`（截断了）/ `tags-only`（正文只有标签）/ `empty`（正文是空的）/ NULL（这次没看正文） | 阶段一/二 | 判断这条有没有正文 |
 | `first_seen_at`/`last_seen_at` | 第一次 / 最近一次出现在搜索结果里 | 阶段一 | — |
 | `last_screened_at` | 最近一次被打开初筛 | 阶段一 | — |
 | `last_collected_at`/`last_media_at`/`last_comments_at` | 正文 / 媒体 / 评论各分部最近一次完成 | 阶段二 | 判断哪一块还没做 |
@@ -164,6 +165,7 @@ seen ──打开初筛──> screened ──keep──> approved ──阶段�
 
 | 想要的答案 | 今天能不能查 | 备注 |
 |---|---|---|
+| 这条笔记有正文吗、摘要是不是全文 | 能 | `notes.excerpt_kind`；正文只有标签的条目 `excerpt` 是 NULL |
 | 这条笔记我见过吗 | 能 | `notes` 一行即知 |
 | 我判断过吗、理由是什么 | 能 | `run_items`（每轮）+ `notes.status`（最新） |
 | 这条的链接还能用吗 | 能 | `run_items.href`，但要按 run 查 |

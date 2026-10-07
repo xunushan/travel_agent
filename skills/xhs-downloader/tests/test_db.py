@@ -488,3 +488,53 @@ def test_a_thread_read_records_how_complete_it_was(conn) -> None:
     # A second read replaces the first rather than accumulating.
     db.store_comments_meta(conn, NOTE_ID, {"collected": 30})
     assert db.comments_row(conn, NOTE_ID)["collected"] == 30
+
+
+# --- the screening excerpt -------------------------------------------------
+
+
+def test_a_body_of_nothing_but_tags_excerpts_to_nothing() -> None:
+    """Measured 2026-10-07, note 6a0d98fd: this is the WHOLE body.
+
+    An excerpt holding three tags reads as if the note said something about
+    甘南旅游; the kind column is what says it said nothing.
+    """
+    excerpt, kind = db.excerpt_of("#甘南旅游 #自驾游旅游 #自由行旅游")
+
+    assert excerpt is None
+    assert kind == db.EXCERPT_TAGS_ONLY
+
+
+def test_a_tag_run_after_a_sentence_goes_but_tags_inside_one_stay() -> None:
+    excerpt, kind = db.excerpt_of("第3天#桑科草原 扎营，早上出发。 #甘南 #自驾")
+
+    assert excerpt == "第3天#桑科草原 扎营，早上出发。"
+    assert kind == db.EXCERPT_FULL
+
+
+def test_a_body_that_fits_is_marked_full_and_a_longer_one_truncated() -> None:
+    assert db.excerpt_of("十月去正合适。") == ("十月去正合适。", db.EXCERPT_FULL)
+
+    excerpt, kind = db.excerpt_of("甲" * 700)
+    assert kind == db.EXCERPT_TRUNCATED
+    assert len(excerpt) == db.EXCERPT_LIMIT and excerpt.endswith("…")
+
+
+def test_a_body_that_was_read_and_is_empty_is_not_the_same_as_unread() -> None:
+    """`""` is a body that says nothing; `None` is a run that never looked."""
+    assert db.excerpt_of("   ") == (None, db.EXCERPT_EMPTY)
+    assert db.excerpt_of(None) == (None, None)
+
+
+def test_the_excerpt_kind_is_stored_and_not_erased_by_a_partial_reread(conn) -> None:
+    """A media-only run passes no excerpt, and COALESCE keeps what is there."""
+    db.store_note(conn, {"noteId": NOTE_ID, "content": "#甘南 #自驾", "tags": ["甘南", "自驾"]},
+                  note_dir="/tmp/x", status=db.STATUS_SCREENED,
+                  excerpt=None, excerpt_kind=db.EXCERPT_TAGS_ONLY)
+    assert db.note_row(conn, NOTE_ID)["excerpt_kind"] == db.EXCERPT_TAGS_ONLY
+
+    # content=None: this read did not look at the body at all.
+    db.store_note(conn, {"noteId": NOTE_ID, "content": None}, status=db.STATUS_COLLECTED)
+    row = db.note_row(conn, NOTE_ID)
+    assert row["excerpt_kind"] == db.EXCERPT_TAGS_ONLY
+    assert row["status"] == db.STATUS_COLLECTED

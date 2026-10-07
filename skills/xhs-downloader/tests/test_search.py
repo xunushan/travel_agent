@@ -812,6 +812,15 @@ def test_a_thin_body_is_marked_so_its_cover_gets_read() -> None:
     assert "[短正文 9 字·看图]" in search.digest_row(1, row, excerpt=150)[0]
 
 
+def test_a_note_of_pure_tags_reads_as_having_no_body() -> None:
+    """Not "短正文 0 字" — the count would suggest text, and there is none."""
+    row = {"noteId": NOTE_A, "title": "甘南秘境", "content": "",
+           "excerptKind": db.EXCERPT_TAGS_ONLY, "status": db.STATUS_COLLECTED,
+           "coverPath": "/tmp/xhs/cover.webp"}
+
+    assert "[无正文·只有标签·看图]" in search.digest_row(1, row, excerpt=150)[0]
+
+
 def test_a_short_body_with_no_cover_says_so() -> None:
     """No picture to read is a different fact from "there is one, go look"."""
     row = {"noteId": NOTE_A, "title": "甘南路线图", "content": "见图",
