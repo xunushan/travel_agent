@@ -28,6 +28,7 @@ chrome-agent tabs activate <tab-id> --json   # 采评论必须在前台
 | 改脚本、改选择器、改产出结构 | [references/files.md](references/files.md) |
 | 定搜索词与筛选、筛选没生效 | [references/filters.md](references/filters.md) |
 | 判断哪几篇值得下载 | [references/selection.md](references/selection.md) |
+| 查「这条下过没有」、库里有哪几张表 | [references/schema.md](references/schema.md) |
 
 ## 两阶段
 
