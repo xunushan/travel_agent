@@ -785,6 +785,13 @@ def run_phase_one(args, config: dict) -> int:
             applied = outcome["applied"] or applied
 
         candidates = [item for group in groups for item in group["items"]]
+        # One running number across the whole run, matching the digest the reader
+        # sees. `discover` numbers each keyword's page from 1, so leaving those
+        # numbers alone made a 26-candidate run hold 16 distinct ranks and the
+        # ledger could not be read back against the table. The page position
+        # within a keyword is still this order, filtered by keyword.
+        for position, item in enumerate(candidates, start=1):
+            item["rank"] = position
         decisions = {item["note_id"]: item["decision"] for item in db.run_items(conn, run_id)}
         db.add_run_items(
             conn,

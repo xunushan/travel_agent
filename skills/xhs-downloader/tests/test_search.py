@@ -798,6 +798,26 @@ def test_each_keyword_gets_its_own_opening_budget(monkeypatch, tmp_path, capsys)
         assert db.note_row(conn, NOTE_C)["status"] == db.STATUS_SCREENED
 
 
+def test_the_ledger_numbers_candidates_across_keywords(monkeypatch, site, tmp_path) -> None:
+    """Each keyword's page numbers its own cards from 1.
+
+    Left alone, a run over two keywords held two rows ranked 1, two ranked 2, and
+    so on — measured in run 2 of 2026-10-07, 26 candidates holding 16 distinct
+    ranks, which is a ledger nobody can read back against the digest. The order
+    within a keyword is this same order, filtered by `keyword`.
+    """
+    monkeypatch.setattr(search.time, "sleep", lambda _seconds: None)
+    assert run_cli(monkeypatch, site, [
+        "run", "--tab-id", "1", "--keywords", "川西秋色;稻城亚丁 秋", "--no-screen",
+        *data_args(tmp_path),
+    ]) == 0
+
+    with db.open_db(database_of(tmp_path)) as conn:
+        items = db.run_items(conn, 1)
+    assert [item["rank"] for item in items] == [1, 2, 3]
+    assert [item["keyword"] for item in items] == ["川西秋色", "川西秋色", "稻城亚丁 秋"]
+
+
 def test_a_thin_body_is_marked_so_its_cover_gets_read() -> None:
     """The signal the two-layer screen hangs on.
 
