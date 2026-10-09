@@ -32,7 +32,7 @@ DB_FILENAME = "xhs.db"
 # `type` are what the site's own results page sends; they are NOT filters and
 # changing them does not change the sort or the note type — measured 2026-10-07,
 # adding `sort=`/`noteType=` here left the server-rendered `searchContext` at
-# `general`/`0`. See `references/filters.md`.
+# `general`/`0`. See the repo's `docs/xhs-筛选机制与实测.md`.
 SEARCH_URL_TEMPLATE = (
     "https://www.xiaohongshu.com/search_result"
     "?keyword={keyword}&source=web_search_result_notes&type=51"

@@ -14,8 +14,8 @@ The other half of this file drives the note page rather than the search page:
 what `download.py` calls before collecting. Navigation lives in one module so
 there is one place that knows how a page is opened, closed and waited for.
 
-Two facts shape the filter code, both measured 2026-10-07 and recorded in
-`references/filters.md`:
+Two facts shape the filter code, both measured 2026-10-07 and recorded in the
+repo's `docs/xhs-筛选机制与实测.md`:
 
 * **A filter is a press, never a URL parameter.** Navigating to a results URL
   carrying `sort=time_descending` left the page's own `searchContext` at
@@ -629,7 +629,7 @@ def list_filters(tab_id: int, config: dict, timeout: float) -> int:
     if not groups:
         raise RuntimeError(
             "筛选弹层打开了，但里面一个选项也没读到。页面结构可能变了："
-            "请看 references/filters.md 并更新 locators.yaml 的 search.filters.* 一段。"
+            "请看仓库 docs/xhs-筛选机制与实测.md 并更新 locators.yaml 的 search.filter_* 一段。"
         )
     print("搜索页筛选选项（读自当前页面，不是固定词表）")
     if channels:
