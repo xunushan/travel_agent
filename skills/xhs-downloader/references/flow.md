@@ -34,7 +34,7 @@ python "$SITE/scripts/discover.py" --tab-id <tab-id> --list-filters
 （排序依据 / 发布时间 / 搜索范围 / 位置距离）的选项，`*` 标当前生效项。
 
 判据：至少读到一组弹层选项。读不到会**显式报错**（不会悄悄退化成"无筛选"）——那说明页面
-结构变了，去改 `locators.yaml: search.filters.*`。同一个 tab 上看过一次即可。
+结构变了，去改 `locators.yaml` 里 `search.filter_*` 那一段。同一个 tab 上看过一次即可。
 
 **这个 tab 必须先停在搜索结果页**（`/search_result/?keyword=…`）。筛选行与"筛选"入口只在
 结果页存在：停在首页或笔记页时会报找不到"筛选"入口——那不是页面改版，是走错了页面。

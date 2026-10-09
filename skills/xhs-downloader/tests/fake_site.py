@@ -36,7 +36,7 @@ NOTE_C = "6ac5fbbf0000000018007118"
 IMAGE_A = "https://sns-webpic-qc.xhscdn.com/notes_pre_post/1040g3aaa.webp"
 IMAGE_B = "https://sns-webpic-qc.xhscdn.com/notes_pre_post/1040g3bbb.webp"
 
-# What the real page offers, measured 2026-10-07 (references/filters.md).
+# What the real page offers, measured 2026-10-07 (repo docs/xhs-筛选机制与实测.md).
 PANEL = {
     "排序依据": ["综合", "最新", "最多点赞", "最多收藏", "最多评论"],
     "笔记类型": ["不限", "视频", "图文"],

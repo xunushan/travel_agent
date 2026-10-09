@@ -156,7 +156,7 @@ download 每开一篇笔记付出的墙上时间，也是它为什么先把「�
 |---|---|
 | `the following arguments are required: --keyword` | discover 缺搜索词（`--list-filters` 时不需要） |
 | `点了「X=Y」但页面没有把它标成生效项` | 筛选没施加成功，脚本已中止。先 `discover.py --list-filters` 看真实选项 |
-| `筛选弹层打开了，但里面一个选项也没读到` | 页面改版，改 `locators.yaml: search.filters.*` |
+| `筛选弹层打开了，但里面一个选项也没读到` | 页面改版，改 `locators.yaml` 里 `search.filter_*` 那一段 |
 | `没有可重放的详情页 URL（索引里也没有）——先 discover 再下载` | `--note-id` 只给了 id，盘上也没存过带 token 的链接。不要拼 URL，回 discover 拿一次 |
 | `有件没下成：image=…` | 见 [flow.md](flow.md#21-输出)；这条是 `FAILED` 并以非 0 退出，理由点名是哪件 |
 | `Tab not found: N` | tab 已关。重新 `tabs list` 拿 id |

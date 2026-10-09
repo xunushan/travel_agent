@@ -23,7 +23,7 @@
 
 **典型用法是两者串联**：discover 出候选后，紧接着对候选跑 download——比如调用方说"搜索'甘南小环线'，top-10，下载 note 和 cover"，智能体就跑 discover 再对候选跑 download（note,cover）。也可以只对给定笔记跑 download，比如"这几篇补 image、video、comment"。
 
-筛选项的可选值记录在 `references/filters.md`（实测维护），调用方据此表达筛选意图；选项失效时显式报错，不悄悄退化成无筛选。
+筛选项的可选值不写死词表，运行时从页面上读（`discover.py --list-filters`），调用方据此表达筛选意图；选项失效时显式报错，不悄悄退化成无筛选。页面上的维度与实测记录见 [`docs/xhs-筛选机制与实测.md`](xhs-筛选机制与实测.md)。
 
 ### 2.2 落盘结构
 

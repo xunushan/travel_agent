@@ -27,7 +27,7 @@ search:
   card_time:
     class_contains: [time]
     visible: true
-  # --- 筛选控件（全部实测于 2026-10-07，见 references/filters.md）---
+  # --- 筛选控件（全部实测于 2026-10-07，见仓库 docs/xhs-筛选机制与实测.md）---
   # 笔记类型是常驻的 channel 行，不需要打开任何弹层；其余四组在弹层里。
   # 同名的「笔记类型」在弹层里也有一份（不限/视频/图文），但「用户」只在 channel 行，
   # 所以 `--filters 笔记类型=图文` 走 channel（少一次点击），只有 channel 没有的选项才开弹层。
