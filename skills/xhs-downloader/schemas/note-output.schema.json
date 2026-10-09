@@ -24,7 +24,7 @@
     "warnings"
   ],
   "properties": {
-    "schemaVersion": {"const": 3},
+    "schemaVersion": {"const": 4},
     "capturedAt": {
       "type": "string",
       "format": "date-time",

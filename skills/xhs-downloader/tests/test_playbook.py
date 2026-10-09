@@ -11,17 +11,15 @@ import pytest
 SCRIPTS = Path(__file__).parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-import batch  # noqa: E402
 import collect  # noqa: E402
 import comments  # noqa: E402
 import discover  # noqa: E402
+import download  # noqa: E402
 import media  # noqa: E402
-import migrate  # noqa: E402
 import note  # noqa: E402
 import runtime  # noqa: E402
-import search  # noqa: E402
 import state  # noqa: E402
-from discover import close_detail_if_open, open_result  # noqa: E402
+from discover import close_detail_if_open, open_note  # noqa: E402
 from runtime import load_locators, note_id  # noqa: E402
 
 NOTE = "6ac48ca100000000140034ed"
@@ -44,7 +42,7 @@ def patch_browser(monkeypatch, browser) -> None:
     already covers it. `raising=False` is what lets one tuple list both kinds
     instead of making every caller know which module is which.
     """
-    for module in (batch, discover, runtime, comments, media, search, state):
+    for module in (discover, download, runtime, comments, media, state):
         monkeypatch.setattr(module, "chrome_agent", browser, raising=False)
 
 
@@ -115,7 +113,7 @@ def config() -> dict:
 
 def test_search_discovery_keeps_visible_signed_result_cards_and_title(config) -> None:
     href = f"https://www.xiaohongshu.com/search_result/{NOTE}?xsec_token=token&xsec_source=pc_search"
-    found = discover.discover(
+    found = discover.cards(
         page(
             SEARCH_URL,
             element(
@@ -147,7 +145,7 @@ def test_search_discovery_keeps_visible_signed_result_cards_and_title(config) ->
 
 def test_search_discovery_falls_back_to_enclosing_card_text(config) -> None:
     href = f"https://www.xiaohongshu.com/search_result/{NOTE}?xsec_token=token"
-    found = discover.discover(
+    found = discover.cards(
         page(
             SEARCH_URL,
             element(
@@ -249,7 +247,7 @@ def test_the_channel_row_rule_ignores_the_sites_own_side_nav(config) -> None:
 
 def test_close_detail_is_a_noop_when_no_detail_is_open(monkeypatch, config) -> None:
     fake = FakeBrowser(search_page())
-    monkeypatch.setattr(discover, "chrome_agent", fake)
+    patch_browser(monkeypatch, fake)
 
     assert close_detail_if_open(1, config) is None
     assert fake.calls == [("page", "snapshot", "--tab-id", "1", "--scope", "full")]
@@ -257,7 +255,7 @@ def test_close_detail_is_a_noop_when_no_detail_is_open(monkeypatch, config) -> N
 
 def test_close_detail_clicks_the_close_control(monkeypatch, config) -> None:
     fake = FakeBrowser(detail_page(), search_page())
-    monkeypatch.setattr(discover, "chrome_agent", fake)
+    patch_browser(monkeypatch, fake)
 
     assert close_detail_if_open(1, config) == "close_control"
     assert fake.modes() == ["page.click"]
@@ -266,7 +264,7 @@ def test_close_detail_clicks_the_close_control(monkeypatch, config) -> None:
 def test_close_detail_falls_back_to_keypress_when_control_is_hidden(monkeypatch, config) -> None:
     """The narrow layout hides the close button; Escape is what dismisses it."""
     fake = FakeBrowser(detail_page(with_close=False), detail_page(with_close=False), search_page())
-    monkeypatch.setattr(discover, "chrome_agent", fake)
+    patch_browser(monkeypatch, fake)
 
     assert close_detail_if_open(1, config) == "keypress:Escape"
     assert fake.modes() == ["page.keypress"]
@@ -276,65 +274,41 @@ def test_close_detail_handles_a_layout_without_note_container(monkeypatch, confi
     """Wide windows render the note as a standalone page: mask, no container."""
     standalone = page(NOTE_URL, element("mask", className="note-detail-mask"))
     fake = FakeBrowser(standalone, standalone, search_page())
-    monkeypatch.setattr(discover, "chrome_agent", fake)
+    patch_browser(monkeypatch, fake)
 
     assert close_detail_if_open(1, config) == "keypress:Escape"
 
 
 def test_close_detail_raises_when_nothing_dismisses_it(monkeypatch, config) -> None:
     fake = FakeBrowser(detail_page(with_close=False))
-    monkeypatch.setattr(discover, "chrome_agent", fake)
+    patch_browser(monkeypatch, fake)
     monkeypatch.setattr(discover, "DETAIL_CLOSE_TIMEOUT", 0.0)
 
     with pytest.raises(RuntimeError, match="详情遮罩仍开着"):
         close_detail_if_open(1, config)
 
 
-# --- opening a result -------------------------------------------------------
+# --- opening a note ---------------------------------------------------------
 
 
-def selected(rank: int = 1, ref: str = "cover", target: str = NOTE) -> dict:
-    return {
-        "rank": rank,
-        "ref": ref,
-        "noteId": target,
-        "title": "t",
-        "href": f"https://www.xiaohongshu.com/search_result/{target}?xsec_token=token",
-    }
-
-
-def test_open_result_confirms_the_landing_note(monkeypatch, config) -> None:
+def test_open_note_confirms_the_landing_note(monkeypatch, config) -> None:
     fake = FakeBrowser(detail_page())
-    monkeypatch.setattr(discover, "chrome_agent", fake)
+    patch_browser(monkeypatch, fake)
 
-    opened = open_result(1, selected(), "click", config)
-
-    assert opened["noteId"] == NOTE
-    assert opened["mode"] == "click"
+    assert open_note(1, NOTE_URL, NOTE, config) == NOTE_URL
     # The tab is foregrounded first: a backgrounded tab's lazy loading is
     # throttled by Chrome, so the comment thread would never grow.
-    assert fake.modes() == ["tabs.activate", "page.click"]
+    assert fake.modes() == ["tabs.activate", "tabs.navigate"]
 
 
-def test_open_result_falls_back_to_navigate_when_the_click_mislands(monkeypatch, config) -> None:
-    """A click that hits the overlay reports success but stays on the old note."""
-    fake = FakeBrowser(detail_page(OTHER_URL), detail_page(NOTE_URL))
-    monkeypatch.setattr(discover, "chrome_agent", fake)
-    monkeypatch.setattr(discover, "NOTE_OPEN_TIMEOUT", 0.0)
-
-    opened = open_result(1, selected(), "click", config)
-
-    assert opened["mode"] == "navigate"
-    assert fake.modes() == ["tabs.activate", "page.click", "tabs.navigate"]
-
-
-def test_open_result_raises_instead_of_collecting_the_wrong_note(monkeypatch, config) -> None:
+def test_open_note_raises_instead_of_collecting_the_wrong_note(monkeypatch, config) -> None:
+    """A stale `xsec_token` lands on a 404, which is reported, never worked around."""
     fake = FakeBrowser(detail_page(OTHER_URL))
-    monkeypatch.setattr(discover, "chrome_agent", fake)
+    patch_browser(monkeypatch, fake)
     monkeypatch.setattr(discover, "NOTE_OPEN_TIMEOUT", 0.0)
 
     with pytest.raises(RuntimeError, match="没有落在目标笔记"):
-        open_result(1, selected(), "click", config)
+        open_note(1, NOTE_URL, NOTE, config)
 
 
 # --- comments ---------------------------------------------------------------
@@ -783,60 +757,6 @@ def test_expand_replies_clicks_until_no_control_is_left(monkeypatch, config) -> 
     assert browser.modes().count("page.click") == 1
 
 
-def test_recapture_comments_keeps_downloaded_media(comment_browser, tmp_path) -> None:
-    """Fixing comments must not cost a second round of image downloads."""
-    output = tmp_path / "note.json"
-    output.write_text(json.dumps({
-        "noteId": note_id(NOTE_URL),
-        "url": NOTE_URL,
-        "content": {"text": "正文", "length": 2, "truncated": False},
-        # The pre-v2 layout kept the comment block, the media block and the tab
-        # source inside the note file; a re-read has to leave none of them there.
-        "comments": {"items": [{"index": 1, "author": "旧", "text": "旧"}]},
-        "source": {"tabId": 1, "url": NOTE_URL, "title": "旧标题 - 小红书"},
-        "media": {"images": [{"src": "https://example.com/a.webp"}], "downloads": []},
-        "warnings": [
-            "评论仅包含当前 Web 页面已加载和已展开的范围",
-            "正文达到采集上限，可能不完整",
-        ],
-    }, ensure_ascii=False))
-
-    payload = comments.recapture_comments(1, output_path=output, comment_limit=3)
-
-    # The thread lands in its own file, ready to be replaced on its own later.
-    assert payload["collected"] == 3
-    assert [item["author"] for item in payload["items"]] == [
-        "椰子岛🏝", "老虎吃鸡", "Hui."
-    ]
-    assert "source" not in payload
-    written = json.loads((tmp_path / "comments.json").read_text())
-    assert written["noteId"] == note_id(NOTE_URL)
-    assert written["collected"] == 3 and written["requested"] == 3
-    assert written["warnings"] == []
-
-    # The note keeps the note itself — a comment pass never re-downloads media,
-    # and the media now lives in downloads.json, moved there, not re-fetched.
-    note = json.loads(output.read_text())
-    assert note["content"] == "正文"
-    assert note["url"] == NOTE_URL
-    for key in ("comments", "commentsFile", "media", "source"):
-        assert key not in note
-    assert json.loads((tmp_path / "downloads.json").read_text())["images"] == [
-        {"src": "https://example.com/a.webp"}
-    ]
-    # The comment diagnostic moved to the comment file with the thread; the note
-    # keeps its own warning and gains one line saying what the migration left out.
-    assert note["warnings"] == [
-        "正文达到采集上限，可能不完整",
-        migrate.MIGRATION_WARNING,
-    ]
-
-
-def test_recapture_comments_refuses_a_note_that_was_never_collected(tmp_path) -> None:
-    with pytest.raises(RuntimeError, match="不存在"):
-        comments.recapture_comments(1, output_path=tmp_path / "missing" / "note.json")
-
-
 REPLY_TO_REPLY = "\n".join(["北斋", "回复 椰子岛🏝 : 电车SUV好走不", "10-06北京", "1", "回复"])
 
 
@@ -1122,15 +1042,15 @@ def test_collect_note_writes_the_three_files(monkeypatch, tmp_path) -> None:
     browser = FakeNoteBrowser()
     patch_browser(monkeypatch, browser)
     monkeypatch.setattr(comments.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(media, "IMAGE_READY_TIMEOUT", 0.0)
     note_dir = tmp_path / NOTE
 
     note_payload = collect.collect_note(
         1,
         note_dir=note_dir,
         output_path=note_dir / "note.json",
+        parts=("note", "image", "comment"),
         comment_limit=3,
-        download_images=False,
-        with_comments=True,
     )
 
     assert set(note_payload) == {
@@ -1139,7 +1059,11 @@ def test_collect_note_writes_the_three_files(monkeypatch, tmp_path) -> None:
         "stats", "tags", "content", "warnings",
     }
     assert note_payload["content"] == "徒步雀儿山主峰冰川的正文"
-    assert note_payload["warnings"] == []
+    # This fixture's page carries no picture, and the media reader says so
+    # rather than reporting a note without pictures.
+    assert note_payload["warnings"] == [
+        "未识别出笔记原图，已拒绝下载小图/表情/评论配图/页面资源"
+    ]
     # This fixture's page carries no state script, so it is a DOM read and the
     # fields only the state answers are null.
     assert note_payload["capturedFrom"] == "dom"
@@ -1197,155 +1121,3 @@ def test_the_broader_fallback_scope_needs_a_note_image_url() -> None:
     assert media.is_note_image({**NOTE_SLIDE, "src": avatar}, "container") is False
     assert media.is_note_image(NOTE_SLIDE, "container") is True
     assert media.is_note_image(UNMOUNTED_SLIDE, None) is True
-
-
-# --- batch.py -----------------------------------------------------------------
-
-
-def test_the_run_log_measures_the_body_not_the_old_dict_container() -> None:
-    """Found live: a `--comments-only` run reported 正文3 for every legacy note.
-
-    Those files keep the body as `{"text": ..., "length": ...}`, so `len()` was
-    counting the container's keys instead of the text.
-    """
-    legacy = {"content": {"text": "六月的川西", "length": 5, "truncated": False}}
-    assert batch.body_chars(legacy) == 5
-    assert batch.body_chars({"content": "六月的川西"}) == 5
-
-
-def test_a_note_without_a_readable_body_logs_zero() -> None:
-    assert batch.body_chars({}) == 0
-    assert batch.body_chars({"content": {"truncated": False}}) == 0
-    assert batch.body_chars({"content": None}) == 0
-
-
-# --- migrating a directory the old version wrote (migrate.py) -----------------
-
-LEGACY_IMAGE = {
-    "alt": None,
-    "width": 1080,
-    "height": 1440,
-    "source": "img",
-    "src": "https://sns-webpic-qc.xhscdn.com/20261006/aa/notes_pre_post/1040g3k8.webp",
-}
-LEGACY_DOWNLOAD = {
-    "id": 1167,
-    "url": LEGACY_IMAGE["src"],
-    "state": "complete",
-    "filename": "/tmp/notes/x/images/note-001.webp",
-    "originalFilename": "/Users/me/Downloads/chrome-agent/note-001.webp",
-}
-
-
-def legacy_note_dir(tmp_path, note: str = NOTE, **overrides: object):
-    """A note directory in the pre-v2 layout, media and all."""
-    directory = tmp_path / note
-    directory.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "schemaVersion": 1,
-        "capturedAt": "2026-10-06T15:17:31+00:00",
-        "source": {
-            "tabId": 2223711,
-            "url": f"https://www.xiaohongshu.com/explore/{note}?xsec_token=token",
-            "title": "川西的秋天 - 小红书",
-        },
-        "content": {"text": "川西的秋天", "length": 5, "truncated": False},
-        "comments": {"items": [{"index": 1, "author": "旧", "text": "旧"}], "scope": "all"},
-        "media": {"images": [LEGACY_IMAGE], "audioVideo": [], "downloads": [LEGACY_DOWNLOAD]},
-        "warnings": ["评论仅包含当前 Web 页面已加载和已展开的范围"],
-    }
-    payload.update(overrides)
-    (directory / "note.json").write_text(json.dumps(payload, ensure_ascii=False))
-    return directory
-
-
-def test_a_legacy_note_becomes_the_current_shape(tmp_path) -> None:
-    """The pre-v2 file carried the media block and the tab source inside it."""
-    directory = legacy_note_dir(tmp_path)
-
-    result = migrate.migrate_note_dir(directory)
-
-    assert result["migrated"] is True
-    note_payload = json.loads((directory / "note.json").read_text())
-    assert list(note_payload) == [
-        "schemaVersion", "capturedAt", "noteId", "url", "title", "type", "author",
-        "authorId", "ipLocation", "publishedAt", "updatedAt", "capturedFrom",
-        "stats", "tags", "content", "warnings",
-    ]
-    assert note_payload["content"] == "川西的秋天"
-    assert note_payload["url"].endswith(f"/explore/{NOTE}?xsec_token=token")
-    # The old title came from the browser tab; the current one is the note's h1.
-    assert note_payload["title"] == "川西的秋天"
-    # Decoded from the note ID, like a fresh collection would.
-    assert note_payload["publishedAt"] == "2026-10-06T13:52:33+08:00"
-    assert note_payload["stats"] == {
-        "likes": None, "collects": None, "comments": None, "shares": None
-    }
-    # Fields the old collector never stored stay null, and say why.
-    assert note_payload["author"] is None and note_payload["tags"] is None
-    assert note_payload["warnings"] == [migrate.MIGRATION_WARNING]
-
-
-def test_the_media_block_moves_to_downloads_json_unchanged(tmp_path) -> None:
-    directory = legacy_note_dir(tmp_path)
-
-    migrate.migrate_note_dir(directory)
-
-    downloads = json.loads((directory / "downloads.json").read_text())
-    assert downloads["images"] == [LEGACY_IMAGE]
-    assert downloads["downloads"] == [LEGACY_DOWNLOAD]
-    assert downloads["source"]["tabId"] == 2223711
-    assert downloads["content"] == {"length": 5, "truncated": False}
-    # Migration reads and writes JSON only: it moves no file on disk.
-    assert not (directory / "images").exists()
-
-
-def test_a_video_note_is_typed_video(tmp_path) -> None:
-    """An empty `audioVideo` is the only thing that separates 图文 from 视频."""
-    directory = legacy_note_dir(
-        tmp_path, media={"images": [LEGACY_IMAGE], "audioVideo": [{"url": "https://e.com/v.mp4"}],
-                         "downloads": [LEGACY_DOWNLOAD]},
-    )
-
-    migrate.migrate_note_dir(directory)
-
-    assert json.loads((directory / "note.json").read_text())["type"] == "video"
-
-
-def test_a_legacy_thread_moves_out_labelled_as_v1(tmp_path) -> None:
-    """The old thread has no reply tree, so it must not claim the current shape."""
-    directory = legacy_note_dir(tmp_path)
-
-    migrate.migrate_note_dir(directory)
-
-    thread = json.loads((directory / "comments.json").read_text())
-    assert thread["schemaVersion"] == 1
-    assert thread["items"] == [{"index": 1, "author": "旧", "text": "旧"}]
-    assert thread["scope"] == "all"
-    # The note's comment diagnostic describes the thread, so it travels with it.
-    assert thread["warnings"] == [migrate.COMMENTS_MIGRATION_WARNING,
-                                 "评论仅包含当前 Web 页面已加载和已展开的范围"]
-
-
-def test_a_fresher_comments_file_wins_over_the_stale_block(tmp_path) -> None:
-    directory = legacy_note_dir(tmp_path)
-    fresh = {"schemaVersion": 2, "noteId": NOTE, "items": [], "collected": 0}
-    (directory / "comments.json").write_text(json.dumps(fresh, ensure_ascii=False))
-
-    result = migrate.migrate_note_dir(directory)
-
-    assert json.loads((directory / "comments.json").read_text()) == fresh
-    assert any("丢弃" in action for action in result["actions"])
-    assert "comments" not in json.loads((directory / "note.json").read_text())
-
-
-def test_migrating_a_current_directory_changes_nothing(tmp_path) -> None:
-    directory = legacy_note_dir(tmp_path)
-    migrate.migrate_note_dir(directory)
-    before = {path.name: path.read_bytes() for path in directory.iterdir() if path.is_file()}
-
-    result = migrate.migrate_note_dir(directory)
-
-    assert result["migrated"] is False
-    after = {path.name: path.read_bytes() for path in directory.iterdir() if path.is_file()}
-    assert before == after

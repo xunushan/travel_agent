@@ -16,7 +16,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from discover import activate_tab
-from migrate import migrate_note_dir
 from runtime import (
     chrome_agent,
     comment_snapshot,
@@ -25,7 +24,6 @@ from runtime import (
     find_all,
     find_first,
     load_locators,
-    note_id,
 )
 
 # A reply to another reply keeps its target inline as "回复 <名字> : <正文>".
@@ -498,46 +496,4 @@ def write_comments(
     path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    return payload
-
-
-def recapture_comments(
-    tab_id: int,
-    *,
-    output_path: Path,
-    comment_limit: int | None = None,
-    fallback: str | None = None,
-    comment_scrolls: int | None = None,
-) -> dict:
-    """(Re)read the comment thread of an existing note into `comments.json`.
-
-    Media was downloaded and verified in an earlier run, so nothing here
-    downloads anything. A note left in the pre-v2 layout is migrated as a whole
-    (see `migrate.py`) rather than having the two comment keys pulled out of it:
-    the half-migrated result still carried the media block inside `note.json`.
-    """
-    config = load_locators()
-    if comment_limit is None:
-        comment_limit = config["scroll"]["comments"].get("limit", 10)
-    if comment_scrolls is not None:
-        config["scroll"]["comments"]["max_steps"] = comment_scrolls
-    if not output_path.is_file():
-        raise RuntimeError(f"{output_path} 不存在，无法只重采评论")
-    note = json.loads(output_path.read_text(encoding="utf-8"))
-    comments, warnings = collect_comments(tab_id, config, comment_limit, fallback)
-    payload = write_comments(
-        output_path,
-        note_id_value=note.get("noteId") or note_id(note.get("url")) or output_path.parent.name,
-        comments=comments,
-        warnings=warnings,
-    )
-
-    legacy = [key for key in ("comments", "commentsFile") if key in note]
-    if legacy:
-        # Two keys were the whole of an earlier attempt, and it left the note in
-        # a half-migrated state: the comment block was gone while the media
-        # block, the tab source and the dict-shaped body stayed behind — the
-        # media that this file is not supposed to carry was still inside it.
-        # Touching the note at all now means leaving it in today's shape.
-        migrate_note_dir(output_path.parent)
     return payload

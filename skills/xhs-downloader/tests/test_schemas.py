@@ -37,13 +37,14 @@ def collected(tmp_path, monkeypatch):
     browser = FakeNoteBrowser()
     patch_browser(monkeypatch, browser)
     monkeypatch.setattr(playbook.comments.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(playbook.media, "IMAGE_READY_TIMEOUT", 0.0)
     note_dir = tmp_path / NOTE
     playbook.collect.collect_note(
         1,
         note_dir=note_dir,
         output_path=note_dir / "note.json",
+        parts=("note", "image", "comment"),
         comment_limit=3,
-        with_comments=True,
     )
     return {
         "note-output.schema.json": note_dir / "note.json",

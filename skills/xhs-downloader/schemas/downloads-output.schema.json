@@ -5,9 +5,9 @@
   "description": "The verification file `collect.py` writes into <noteId>/downloads.json: what was discovered, what was asked for, and where each file landed. It exists so a download can be checked without re-running the collection — none of it is note content, which is why it is not in note.json. A download succeeded only when `state` is \"complete\" and `filename` is present; a discovered URL proves nothing was fetched.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "capturedAt", "source", "content", "images", "audioVideo", "downloads", "skipped", "warnings"],
+  "required": ["schemaVersion", "capturedAt", "source", "content", "images", "audioVideo", "downloads", "skipped", "examined", "warnings"],
   "properties": {
-    "schemaVersion": {"const": 3},
+    "schemaVersion": {"const": 4},
     "capturedAt": {"type": "string", "format": "date-time"},
     "source": {
       "type": "object",
@@ -73,6 +73,10 @@
         "required": ["url", "state"],
         "properties": {
           "id": {"type": "integer", "description": "The browser's download id."},
+          "kind": {
+            "enum": ["image", "video"],
+            "description": "Which content part this file belongs to. Absent on entries written before `--part image` and `--part video` were separate, in which case the path under images/ or videos/ decides."
+          },
           "url": {"type": "string"},
           "type": {"enum": ["video", "audio"]},
           "state": {"enum": ["complete", "in_progress", "interrupted", "failed"]},
@@ -91,7 +95,12 @@
     },
     "skipped": {
       "type": "integer",
-      "description": "Discoveries left alone because the database already had them on disk. Non-zero explains an otherwise puzzling empty `downloads` list on a re-run, and `images` still lists them — this is the count of what was deliberately NOT fetched."
+      "description": "Discoveries left alone because their files were already on disk. They still appear in `downloads` as `complete` entries with the filename they already have — this file is the only record of what a note has on disk, so a re-run that dropped them would make the next run fetch every picture again. This count is what says how many of those entries describe work done by an earlier run."
+    },
+    "examined": {
+      "type": "array",
+      "items": {"enum": ["image", "video"]},
+      "description": "Which media kinds the page was read for in the run that wrote this file. This is what keeps \"the note has no video\" apart from \"nobody looked for one\": a pictures-only run writes [\"image\"], and a later run asking for video must open the page again rather than reading the absent entries as an answer. See `media.media_missing`."
     },
     "warnings": {"type": "array", "items": {"type": "string"}}
   }

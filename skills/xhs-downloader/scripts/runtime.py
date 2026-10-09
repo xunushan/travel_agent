@@ -26,8 +26,9 @@ DATA_ROOT_ENV = "XHS_DATA_ROOT"
 NOTES_DIRNAME = "notes"
 DB_FILENAME = "xhs.db"
 
-# The one definition of a search URL, shared by `batch.py` and `search.py` so a
-# two-phase run searches the same page it later downloads from. `source` and
+# The one definition of a search URL, shared by `discover.py` and `download.py`
+# so the run that harvests a page and the run that revisits a note from it are
+# looking at the same site. `source` and
 # `type` are what the site's own results page sends; they are NOT filters and
 # changing them does not change the sort or the note type — measured 2026-10-07,
 # adding `sort=`/`noteType=` here left the server-rendered `searchContext` at
@@ -119,10 +120,50 @@ def data_root(cli_value: str | Path | None = None) -> Path:
 
 
 def notes_dir(root: str | Path, cli_value: str | Path | None = None) -> Path:
-    """Where the note directories go: `<root>/notes/<noteId>/` unless overridden."""
+    """Where the note directories go: `<root>/notes/` unless overridden."""
     if cli_value:
         return Path(cli_value).expanduser()
     return Path(root) / NOTES_DIRNAME
+
+
+# Characters no filesystem wants in a name. `/` is the separator, NUL ends a
+# path outright, and the rest are Windows' own set — harmless on macOS but the
+# archive is meant to be copyable.
+UNSAFE_FILENAME_RE = re.compile(r'[/\\\0:*?"<>|\r\n\t]')
+TITLE_IN_DIRNAME = 40
+
+
+def note_dir_name(note_id: str, title: str | None, limit: int = TITLE_IN_DIRNAME) -> str:
+    """The directory name for a note: `<noteId>_<title>`, made safe.
+
+    The id leads and is what makes the name unique, so two notes sharing a title
+    never collide and a nameless note still gets a directory. The title is for
+    the person reading the folder listing, so it is cut rather than dropped.
+    """
+    text = one_line(UNSAFE_FILENAME_RE.sub(" ", title or ""), limit).strip(" ._")
+    return f"{note_id}_{text}" if text else note_id
+
+
+NOTE_FILENAME = "note.json"
+
+
+def find_note_dir(
+    notes_root: str | Path, note_id: str, known_dir: str | Path | None = None
+) -> Path | None:
+    """The directory a note already lives in, or None if it has none.
+
+    The index is the fast answer and the disk is the true one, so a directory
+    named by `note_dir` counts only while it still holds the note. The glob is
+    the fallback for an index that was deleted (it is a cache — see `db.py`) or
+    written by an older build that named directories by id alone.
+    """
+    notes_root = Path(notes_root)
+    candidates = []
+    if known_dir:
+        candidates.append(Path(known_dir))
+    candidates.append(notes_root / note_id)
+    candidates.extend(sorted(notes_root.glob(f"{note_id}_*")))
+    return next((path for path in candidates if (path / NOTE_FILENAME).is_file()), None)
 
 
 def db_path(root: str | Path, cli_value: str | Path | None = None) -> Path:
@@ -135,9 +176,9 @@ def db_path(root: str | Path, cli_value: str | Path | None = None) -> Path:
 def add_data_arguments(parser: argparse.ArgumentParser) -> None:
     """Add the two storage flags every entry point accepts.
 
-    One helper rather than four copies: the flags have to mean the same thing in
-    `search.py`, `decide.py`, `batch.py` and `collect.py`, or a phase-one run
-    writes an index that phase two cannot find.
+    One helper rather than two copies: the flags have to mean the same thing in
+    `discover.py` and `download.py`, or a discovery's index is not the one the
+    download reads.
     """
     parser.add_argument(
         "--data-root",
@@ -188,7 +229,10 @@ def snapshot(tab_id: int, limit: int | None = None) -> dict:
 
 
 def comment_snapshot_limit(config: dict) -> int:
-    return int(config["scroll"]["comments"].get("snapshot_limit", 3000))
+    # The fallback tracks `locators.yaml`: this number is the ceiling on how many
+    # comments a run can see, so a config that loses the key must not fall back
+    # to the value that could not reach 10.
+    return int(config["scroll"]["comments"].get("snapshot_limit", 8000))
 
 
 def comment_snapshot(tab_id: int, config: dict) -> dict:

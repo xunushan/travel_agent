@@ -215,7 +215,7 @@ scroll:
   search:
     # 搜索结果卡片不是随文档一起出现的。同一次观测：6s → 0 张卡片，14s → 仍 0 张，
     # 更晚 → 25 张 `section.note-item`。`discover.py` 拿到快照就返回，不等待，
-    # 这就是「搜不到结果」类故障的来源，所以 `search.py run` 自己轮询。
+    # 这就是「搜不到结果」类故障的来源，所以 `discover.py run_search` 自己轮询。
     render_timeout: 45      # 秒；等到至少一张 `result_card` 出现，超时报错而不是返回空表
     poll_interval: 1.5
     # 点完一个筛选选项后结果要重排。实测点「最新」后卡片全换，但换完需要几秒。
@@ -247,5 +247,25 @@ scroll:
     # the CLI's 500. One comment row is about twenty elements, so 500 exposes
     # only the first ~22 rows of a long thread and the tail is unreachable
     # however far the page is scrolled. A 66-row thread measured on
-    # 69fad4b5 needs roughly 1400; 3000 leaves room for the surrounding page.
-    snapshot_limit: 3000
+    # 69fad4b5 needs roughly 1400.
+    #
+    # **This number is the ceiling on what a run can ever see**, because a
+    # snapshot is the first N elements in page order, not the ones on screen:
+    # scrolling does not move the window, it only adds rows inside it. Measured
+    # 2026-10-08 on 69042313000000000402be51, whose comment thread grows to 6443
+    # elements (40 top-level comments rendered): at 3000 every round saw the same
+    # first 4 comments no matter how far the thread was scrolled, and `limit: 10`
+    # was unreachable — 30 steps and 60 steps both returned exactly those 4.
+    # At 8000 the same note returns 10/10 in the same wall-clock time. It has to
+    # stay above the whole page, not just above the thread, so a note whose DOM
+    # grows past this will need it raised again — narrowing the snapshot to the
+    # comments container only moves that ceiling, it does not remove it (the
+    # window is still "the first N", and the thread is what grows). The fix that
+    # would actually scale is reading what `--scope viewport` shows after each
+    # scroll and fetching each row by ref, which is a change to comments.py and
+    # has not been tried.
+    #
+    # Cost of the number being high is paid per snapshot in bytes, so it is only
+    # paid where the page is large: a note that matches fewer than 8000 elements
+    # returns exactly what it returned at 3000.
+    snapshot_limit: 8000
