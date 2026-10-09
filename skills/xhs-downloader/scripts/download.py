@@ -14,10 +14,20 @@ disagree. The rules are two:
    are checked entry by entry in `downloads.json`, so a run that lost one
    picture fetches only that one.
 2. **Changed, refresh it.** Opening a note reads its own `lastUpdateTime` and
-   its text; if either says the note is not what was stored, every requested
-   part is re-fetched, and files that no longer belong to the current version
-   are removed. The request bounds the work: a comments-only run refreshes the
-   comments, not the pictures it was never asked for.
+   its text; if either says the note is not what was stored, the note is
+   refreshed as a whole — every part already on disk is re-fetched, plus the
+   ones this run was asked for — and files that no longer belong to the current
+   version are removed. A note is either a video or a gallery, never both, so
+   "the whole note" is a handful of files.
+
+   **Comments are not part of "the whole note".** They are the thread's content,
+   not the author's, and they change on their own, so an edit is no reason to
+   re-read them: they follow rule 1, and `--force` (or asking when there is no
+   `comments.json` yet) is how a caller gets a fresh copy.
+
+   `--force` is the narrower tool: it ignores the disk for the parts that were
+   asked for and only those, so `--part comment --force` re-reads the thread
+   without dragging the gallery along.
 
 Only opening a page can discover a change, so a note whose requested parts are
 all present is skipped without opening anything — `--check-update` is how a
@@ -432,12 +442,30 @@ def handle_note(args, config: dict, conn, entry: dict, requested, notes_root: Pa
 
     changed = bool(stored) and db.content_changed(stored, fresh)
     refresh = bool(args.force or changed)
-    fetched = set(requested) if refresh else set(missing) & set(requested)
+    if changed:
+        # A note that moved is refreshed as a whole: what is already on disk is
+        # part of what changed, so it is brought to the new version too, and the
+        # request only adds to that set. Leaving yesterday's pictures beside a
+        # `note.json` that describes today's is the one state the archive must
+        # not be in.
+        fetched = (set(requested) | downloaded_parts(note_dir)) - {COMMENT}
+        # Comments are not the note's content — they are the thread's, and they
+        # change on their own — so an edit is no reason to re-read them. They
+        # follow rule 1: asked for and absent, or asked for and forced.
+        if COMMENT in requested and (COMMENT in missing or args.force):
+            fetched.add(COMMENT)
+    elif args.force:
+        # `--force` is narrower: it ignores the disk for what was asked for and
+        # touches nothing else, so `--part comment --force` re-reads the thread
+        # without dragging the gallery along.
+        fetched = set(requested)
+    else:
+        fetched = set(missing) & set(requested)
     fetched.discard(NOTE)  # already read and written above
 
-    # 2. Everything else. On a refresh the pictures on disk are not offered as
-    #    skippable, so the whole gallery is fetched again and the leftovers are
-    #    pruned; on a fill, only what is missing is fetched.
+    # 2. Everything else. On a refresh nothing on disk is offered as skippable,
+    #    so every part fetched here really is fetched again and the leftovers of
+    #    the old version are pruned; on a fill, only what is missing is fetched.
     if fetched:
         collect_note(
             args.tab_id,
@@ -454,7 +482,13 @@ def handle_note(args, config: dict, conn, entry: dict, requested, notes_root: Pa
 
     db.store_note(conn, fresh, note_dir=note_dir)
 
-    still = set(missing_parts(note_dir, requested))
+    # A changed note is refreshed as a whole, so parts that were already on disk
+    # were fetched again too. They are named in the report rather than rewritten
+    # behind the caller's back — and a failure in one of them is a real failure,
+    # because the point of refreshing them is that the archive holds one version.
+    reported = list(requested) + [part for part in ALL_PARTS if part in fetched and part not in requested]
+
+    still = set(missing_parts(note_dir, reported))
     fetched.add(NOTE)  # written by the read above, whatever was asked for
     if not stored:
         action = ACTION_NEW
@@ -476,7 +510,7 @@ def handle_note(args, config: dict, conn, entry: dict, requested, notes_root: Pa
         changed=changed,
         parts={
             part: part_state(part, still, fetched, held, stored_media)
-            for part in requested
+            for part in reported
         },
         warnings=note_warnings(note_dir),
     )
@@ -485,7 +519,7 @@ def handle_note(args, config: dict, conn, entry: dict, requested, notes_root: Pa
             f"{part}={'; '.join(media_missing(stored_media, (MEDIA_PARTS[part],))) or '未落盘'}"
             if part in MEDIA_PARTS
             else f"{part}=未落盘"
-            for part in requested if part in still
+            for part in reported if part in still
         )
     return record
 

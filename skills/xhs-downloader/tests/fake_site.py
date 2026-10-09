@@ -47,6 +47,8 @@ CHANNELS = ["全部", "图文", "视频", "用户"]
 DEFAULTS = {"排序依据": "综合", "笔记类型": "不限", "发布时间": "不限", "搜索范围": "不限"}
 
 SEARCH_PATH = "/search_result"
+EXPLORE_PATH = "/explore"
+HOME_URL = "https://www.xiaohongshu.com" + EXPLORE_PATH
 
 
 def rect(x: float, y: float, width: float, height: float) -> dict:
@@ -113,11 +115,9 @@ def note_page(note: str, *, title: str, body: str, updated_ms: int = 17855902970
     return page, texts
 
 
-def card_elements(index: int, note: str, title: str, time_text: str) -> list[dict]:
-    href = (
-        f"https://www.xiaohongshu.com{SEARCH_PATH}/{note}"
-        f"?xsec_token=tok&xsec_source=pc_search"
-    )
+def card_elements(index: int, note: str, title: str, time_text: str,
+                  path: str = SEARCH_PATH) -> list[dict]:
+    href = f"https://www.xiaohongshu.com{path}/{note}?xsec_token=tok&xsec_source=pc_search"
     y = 400 + index * 320
     return [
         element(f"card{index}", tag="section", className="note-item", text=f"{title} 冷三岁 {time_text} 91",
@@ -125,6 +125,21 @@ def card_elements(index: int, note: str, title: str, time_text: str) -> list[dic
         element(f"cover{index}", className="cover mask ld", href=href, rect=rect(960, y, 230, 300)),
         element(f"title{index}", className="title", href=href, text=title, rect=rect(960, y + 260, 230, 20)),
         element(f"time{index}", className="time", text=time_text, rect=rect(1080, y + 270, 60, 19)),
+    ]
+
+
+def home_feed_elements(note_ids: list[str]) -> list[dict]:
+    """The explore home feed, measured 2026-10-09 on a real tab.
+
+    It is the same `section.note-item` markup as a results page — 30 matches for
+    the card rule — but its links point at `/explore/<id>` rather than
+    `/search_result/<id>`. That difference is invisible to the card rule and
+    decides whether a search that read this page by mistake comes back empty.
+    """
+    return [
+        element_
+        for index, note in enumerate(note_ids)
+        for element_ in card_elements(index, note, "首页推荐", "3天前", path=EXPLORE_PATH)
     ]
 
 
@@ -183,6 +198,9 @@ class FakeSite:
         self.images: list[str] = [IMAGE_A, IMAGE_B]
         self.calls: list[tuple] = []
         self.download_count = 0
+        # How many snapshots after a navigate still show the page being left.
+        self.navigate_delay = 0
+        self.stale: dict | None = None
 
     # --- the CLI surface ---
 
@@ -257,6 +275,13 @@ class FakeSite:
     # --- the site ---
 
     def navigate(self, url: str) -> None:
+        if self.navigate_delay:
+            # Real Chrome keeps the page being left on screen while the new
+            # document loads, so the snapshots right after `tabs navigate` are
+            # still the old page — url and all.
+            self.stale = []
+            page = self.snapshot()
+            self.stale = [page] * self.navigate_delay
         self.url = url
         if SEARCH_PATH + "?" in url:
             self.search_url = url
@@ -278,9 +303,13 @@ class FakeSite:
             self.active[dimension] = option
 
     def snapshot(self) -> dict:
+        if self.stale:
+            return self.stale.pop()
         note = runtime.note_id(self.url)
         if note and note in self.notes:
             return self.notes[note][0]
+        if self.url.split("?")[0] == HOME_URL:
+            return {"url": self.url, "elements": home_feed_elements(list(self.notes))}
         elements = channel_elements(self.active["笔记类型"])
         elements.append(element("filter-btn", className="filter", text="筛选",
                                 rect=rect(1324, 88, 84, 40)))

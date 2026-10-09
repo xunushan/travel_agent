@@ -98,7 +98,7 @@ w3c/webextensions#849。）
 | daemon | running (protocol 1.0) |
 | extension | loaded and up to date；`/Users/isuntaiyang/chrome-agent/extension`，磁盘 hash = 已加载 hash = `c00685a5f202` |
 | 调用方 | `travel_agent/skills/xhs-downloader` 的自定义脚本，只走 CLI + `--json` |
-| tab | id `2224023`，页面 `https://www.xiaohongshu.com/explore/69042313000000000402be51?xsec_token=ABdFbeknNiDMJmzxu35W_1uEL1N8tcxzxU1aky8ghgo3U=&xsec_source=pc_feed` |
+| tab | id `2224023`，页面 `https://www.xiaohongshu.com/explore/69042313000000000402be51?xsec_token=<已隐去>&xsec_source=pc_feed` |
 
 ## 最小复现（裸命令，无脚本参与）
 

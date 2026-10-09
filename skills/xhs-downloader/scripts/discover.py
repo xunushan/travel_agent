@@ -261,23 +261,48 @@ def results_snapshot(tab_id: int, config: dict) -> dict:
     `--filters 半年内` failed with "没有选项「半年内」" while that option was on
     screen. The more cards the page has loaded, the likelier the panel is the
     part that gets dropped, so every read of a results page goes through here.
-    See `references/pitfalls.md` §6 on what `--limit` does and does not cut.
+    `runtime.snapshot` says what `--limit` does and does not cut.
     """
     return snapshot(tab_id, int(config["scroll"]["search"].get("snapshot_limit", 2000)))
 
 
-def wait_for(tab_id: int, config: dict, rule: dict, timeout: float, what: str) -> dict:
-    """Poll until `rule` matches something, then return that snapshot."""
+def is_search_page_for(page: dict, keyword: str | None) -> bool:
+    """Whether a snapshot is the results page *for this keyword*.
+
+    `tabs navigate` returns as soon as it has been issued, so the snapshot taken
+    right after it still shows the page being left. That page is often the
+    explore home feed, which is card-for-card the same markup as a results page
+    (`section.note-item`) — so the card rule alone matches it, the search
+    "finds" results instantly, and because the feed's links point at
+    `/explore/<id>` rather than `/search_result/<id>` the read comes back as a
+    clean, empty candidate list for a search that never ran.
+    """
+    if keyword is None:
+        return True
+    parsed = urlparse(page.get("url") or "")
+    if not parsed.path.startswith("/search_result"):
+        return False
+    return (parse_qs(parsed.query).get("keyword") or [""])[0] == keyword
+
+
+def wait_for(tab_id: int, config: dict, rule: dict, timeout: float, what: str,
+             keyword: str | None = None) -> dict:
+    """Poll until `rule` matches something on the right page, then return it.
+
+    `keyword` is what tells a results page apart from whatever page happened to
+    be on screen when the navigation was issued — see `is_search_page_for`.
+    """
     deadline = time.time() + timeout
     page = results_snapshot(tab_id, config)
     while True:
-        if find_first(page, rule):
+        if find_first(page, rule) and is_search_page_for(page, keyword):
             return page
         if time.time() >= deadline:
+            wanted = f"关键词「{keyword}」的结果页" if keyword else "搜索结果页"
             raise RuntimeError(
                 f"等了 {timeout:.0f}s 仍没有{what}（当前 {page.get('url')}）。"
-                "搜索结果页是客户端渲染的：确认这个标签页已登录、停在搜索结果页，"
-                "并且没有被广告屏蔽插件拦掉。"
+                f"结果页是客户端渲染的：确认这个标签页已登录，并且真的导航到了{wanted}"
+                "——上面这个 URL 就是脚本最后看到的页面。"
             )
         time.sleep(DEFAULT_POLL_INTERVAL)
         page = results_snapshot(tab_id, config)
@@ -390,6 +415,7 @@ def run_search(tab_id: int, config: dict, keyword: str, specs: list[dict]) -> di
         config["search"]["result_card"],
         config["scroll"]["search"].get("render_timeout", DEFAULT_RENDER_TIMEOUT),
         "搜索结果卡片",
+        keyword=keyword,
     )
     applied = apply_filters(tab_id, config, specs) if specs else []
     if applied:

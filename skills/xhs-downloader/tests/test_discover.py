@@ -9,11 +9,25 @@ say (which note, where its detail page is, its title, its date).
 
 from __future__ import annotations
 
+import json
+
 import pytest
 import runtime
 
 import discover
-from fake_site import CHANNELS, PANEL, NOTE_A, FakeSite, data_args, run_cli, site  # noqa: F401
+from fake_site import (  # noqa: F401
+    CHANNELS,
+    EXPLORE_PATH,
+    HOME_URL,
+    NOTE_A,
+    NOTE_B,
+    PANEL,
+    SEARCH_PATH,
+    FakeSite,
+    data_args,
+    run_cli,
+    site,
+)
 from test_playbook import patch_browser
 
 
@@ -292,5 +306,57 @@ def test_the_limit_keeps_the_first_n_cards(site) -> None:
     site.navigate(discover.search_page_url("川西秋色"))
 
     assert len(discover.cards(site.snapshot(), config, 1)) == 1
+
+
+# --- the whole run ---------------------------------------------------------
+
+
+def test_a_search_reads_the_results_page_it_navigated_to(monkeypatch, site, tmp_path, capsys) -> None:
+    assert run_cli(monkeypatch, site, [
+        "--tab-id", "1", "--keyword", "川西秋色", *data_args(tmp_path),
+    ]) == 0
+
+    out = json.loads(capsys.readouterr().out)
+    assert [item["noteId"] for item in out["candidates"]] == [NOTE_A, NOTE_B]
+    assert out["source"]["url"].startswith("https://www.xiaohongshu.com" + SEARCH_PATH)
+    assert out["summary"] == {"candidates": 2, "inLibrary": 0, "new": 2}
+
+
+def test_a_search_does_not_read_the_page_it_is_leaving(monkeypatch, site, tmp_path, capsys) -> None:
+    """Measured 2026-10-09 on a real tab left on the explore home feed.
+
+    `tabs navigate` is asynchronous: the snapshot taken right after it still
+    shows the page being left, and the home feed is card-for-card the same markup
+    as a results page (`section.note-item`, 30 matches). Waiting on the card rule
+    alone therefore "found" the old page instantly, and because its links point at
+    `/explore/<id>` rather than `/search_result/<id>` the read produced a clean,
+    empty candidate list for a search that never ran.
+    """
+    site.url = HOME_URL
+    site.navigate_delay = 1
+
+    assert run_cli(monkeypatch, site, [
+        "--tab-id", "1", "--keyword", "川西秋色", *data_args(tmp_path),
+    ]) == 0
+
+    out = json.loads(capsys.readouterr().out)
+    assert [item["noteId"] for item in out["candidates"]] == [NOTE_A, NOTE_B]
+
+
+def test_a_second_search_does_not_read_the_first_ones_results(monkeypatch, site, tmp_path, capsys) -> None:
+    """The likelier version of the same race: the tab is normally left on the
+    previous search, whose cards match every rule a results page has — including
+    the `/search_result/` ones. Only the page's own keyword tells them apart.
+    """
+    site.navigate(discover.search_page_url("稻城亚丁 秋"))
+    site.navigate_delay = 1
+
+    assert run_cli(monkeypatch, site, [
+        "--tab-id", "1", "--keyword", "川西秋色", *data_args(tmp_path),
+    ]) == 0
+
+    out = json.loads(capsys.readouterr().out)
+    assert out["keyword"] == "川西秋色"
+    assert [item["noteId"] for item in out["candidates"]] == [NOTE_A, NOTE_B]
 
 

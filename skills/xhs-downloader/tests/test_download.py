@@ -194,6 +194,54 @@ def test_an_edited_note_refreshes_every_requested_part(monkeypatch, capsys, tmp_
     assert page_opens(site) > 0
 
 
+def test_an_edited_note_brings_its_other_parts_up_to_date_too(monkeypatch, capsys, tmp_path) -> None:
+    """The note moved as a whole, so the gallery is re-fetched even though this
+    run only asked for the text — `note.json` describing one version while
+    `images/` holds another is the state the archive must never be in."""
+    site = a_site(tmp_path)
+    run(monkeypatch, capsys, site, tmp_path, "--url", NOTE_URL, "--part", "note,cover,image")
+
+    site.notes[NOTE_A] = note_page(NOTE_A, title=TITLE, body="改过的正文。")
+    _, second = run(
+        monkeypatch, capsys, site, tmp_path,
+        "--url", NOTE_URL, "--part", "note", "--check-update",
+    )
+
+    assert second[0]["action"] == "refresh"
+    assert second[0]["parts"] == {"note": "已下载", "cover": "已下载", "image": "已下载"}
+    assert second[0]["status"] == "OK"
+
+
+def test_an_edited_note_leaves_the_comment_thread_alone(monkeypatch, capsys, tmp_path) -> None:
+    """The thread is the thread's content and moves on its own, so an edit is no
+    reason to re-read it — `--force` is how a caller asks for that."""
+    site = a_site(tmp_path)
+    run(monkeypatch, capsys, site, tmp_path, "--url", NOTE_URL, "--part", "note,image")
+    thread = note_dir_of(tmp_path) / "comments.json"
+    thread.write_text(json.dumps({"collected": 3}), encoding="utf-8")
+    before = thread.read_bytes()
+
+    site.notes[NOTE_A] = note_page(NOTE_A, title=TITLE, body="改过的正文。")
+    _, second = run(monkeypatch, capsys, site, tmp_path, "--url", NOTE_URL, "--part", "note,comment", "--check-update")
+
+    assert second[0]["action"] == "refresh"
+    assert second[0]["parts"] == {"note": "已下载", "comment": "已存在", "image": "已下载"}
+    assert thread.read_bytes() == before, "the stored thread was not rewritten"
+
+
+def test_force_refreshes_the_requested_parts_and_nothing_else(monkeypatch, capsys, tmp_path) -> None:
+    """`--force` is how a caller re-reads one part on purpose; it must not turn
+    `--part comment --force` into a full re-download."""
+    site = a_site(tmp_path)
+    run(monkeypatch, capsys, site, tmp_path, "--url", NOTE_URL, "--part", "note,image")
+    before = site.download_count
+
+    _, second = run(monkeypatch, capsys, site, tmp_path, "--url", NOTE_URL, "--part", "note", "--force")
+
+    assert second[0]["parts"] == {"note": "已下载"}
+    assert site.download_count == before, "the gallery was not re-fetched"
+
+
 def test_check_update_opens_the_page_and_says_it_was_unchanged(monkeypatch, capsys, tmp_path) -> None:
     """Nothing is missing, so only an explicit ask gets the page opened."""
     site = a_site(tmp_path)

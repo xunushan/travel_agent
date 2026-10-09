@@ -97,7 +97,7 @@ detail:
     class_contains: [note-text]
     visible: true
   # --- 笔记自身的元数据（全部实测于 2026-10-07；各字段的来源与边界见
-  #     references/pitfalls.md 第 19 条。这里是 SSR 状态拿不到时的 DOM 兜底。）---
+  #     references/pitfalls.md 第 4 条。这里是 SSR 状态拿不到时的 DOM 兜底。）---
   # 正文/标题/标签都长在 note-content 这一块里；标题用 h1 限定是因为推荐卡片
   # 也有 .title。
   note_content:
@@ -223,7 +223,8 @@ scroll:
     # 结果页快照的元素上限。默认 500 **不够**：实测 2026-10-07 搜「甘南环线」时
     # matched=711，截断点正好落在「发布时间」组中间，于是面板看起来只有
     # 「不限/一天内」，`--filters 半年内` 会报「没有选项「半年内」」——而那个选项就在
-    # 屏幕上。卡片加载得越多越容易踩到。见 references/pitfalls.md 第 6 条。
+    # 屏幕上。卡片加载得越多越容易踩到。（快照怎么排序、截断的是哪一端，见
+    # `runtime.snapshot` 的 docstring。）
     snapshot_limit: 2000
   comments:
     dy: 900
