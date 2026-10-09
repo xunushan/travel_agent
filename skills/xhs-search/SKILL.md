@@ -88,3 +88,7 @@ digest 存档、run 日志都是中间数据，**不是输出**。
    打勾与写结论文档时**。
 8. **档案不重做**：`digest/` 在 = 解析过。已有存档就跳过管线，不够时按 xhs-digest 的
    "定向补读"增补，不重跑。
+9. **素材必须能渲染**：结论文档里的图是**内联图**，不是裸路径——复制成
+   `answers/assets/<question_id>/` 下的 **ASCII 文件名**副本再引（直接引 `notes/` 原路径会因
+   中文/emoji 的百分号编码在预览里裂开），原图不动。细则见
+   [references/output-formats.md](references/output-formats.md)。
