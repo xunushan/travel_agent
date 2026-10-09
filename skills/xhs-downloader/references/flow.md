@@ -94,7 +94,7 @@ discover 不提供正文。要判断内容而卡片标题不够时，两条路�
 
 - 直接下 `--part note`（便宜，一页一次快照），读 `<noteDir>/note.json` 的 `content` 全文；
 - 封面常常是信息本体（时间表、路线图、机位清单），下 `--part cover` 再 `Read` 那张图。
-  **只在文字不足时读图**——一张图约 1–1.5k token。
+  **只在文字不足时读图**——读图有 token 成本，能用文字判断就别读。
 
 ### 1.5 筛选怎么挑
 
@@ -119,6 +119,7 @@ python "$SITE/scripts/download.py" --tab-id <tab-id> --from candidates.json --li
 - `--part` 默认 `all`，可选 `note`/`cover`/`image`/`video`/`comment` 任意组合：
   `--part note,image`。**`comment` 无论怎么写都最后跑**（滚动评论会把笔记容器挤出快照）。
 - `--interval` 默认 15 秒，只在真的打开了页面时等；走跳过路径的条目不占它。
+- `--comment-limit` 是每篇最多读多少条顶层评论（一条评论连同它的回复算一条）。
 
 ### 2.1 输出
 
