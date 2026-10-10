@@ -1,28 +1,98 @@
 # travel_agent
 
-旅行素材的采集与整理。每个站点一个 skill，放在 `skills/<站点>/`。
+把一次自驾游的信息流程拆成一条可逐步执行的流水线：从"去哪、走哪条线"的目的地认知，到逐景点玩法调研、行程编排、行前准备，再到旅途中的记录与行后回写。每个环节由一个 skill 承担，跑在用户自己的浏览器上。
 
-站点 skill 不实现浏览器能力：它假定 `chrome-agent` 命令可用（CLI + daemon + 已加载的扩展），
-只通过它的 `--json` 输出驱动浏览器。浏览器这一侧出问题，去 [chrome-agent](https://github.com/xunushan/chrome-agent)
-那个仓库查。
+设计总纲见 [docs/自驾游智能体工作流路径图.md](docs/自驾游智能体工作流路径图.md)，核心原则是 **信息先行，决策后置**——人只在信息充分的节点做决策（阶段 0 末选定景点、阶段 2 末确认路线）；天数、人数、宠物这类约束条件到阶段 2 才介入，不作为起点。
 
-## skills/xhs-downloader
+## 流水线
 
-小红书笔记的搜索与下载工具，两个入口：`discover.py` 搜一个关键词、施加筛选、输出候选清单
-（**不打开任何笔记**）；`download.py` 按清单把指定笔记的正文/封面/图片/视频/评论下到本地。
-
-工具本身不做判断——搜什么、留哪几篇、什么时候停都是调用方的事，清单就是 `discover.py` 的输出。
-下载状态就维护在笔记目录的文件里（`note.json` / `cover.*` / `images/` / `videos/` /
-`comments.json` / `downloads.json`），**盘上已有的不再下，变了就整篇刷新**，所以原样重跑一遍
-不会重复下载；sqlite 只存一份索引（`noteId` + 链接 + 更新时间 + 内容指纹），不存正文，
-也没有任何"已下载"标志位。
-
-入口是 [skills/xhs-downloader/SKILL.md](skills/xhs-downloader/SKILL.md)，重内容按需加载在它旁边的
-`references/` 下。
-
-```bash
-python -m pytest -q                       # 规则与产出合同的回归
-pip install -e ".[dev]"                   # pytest + jsonschema
+```text
+0 目的地全局认知与候选清单 ──→【人：选定待调研景点】
+1 单景点玩法细节调研
+2 初步路线编排（此处才引入约束条件）──→【人：确认路线骨架】
+3 行程细化（住宿/停车/吃饭/路况/打卡点）
+4 预订与行前准备
+5 监控与动态调整
+6 旅途中记录
+7 行后沉淀（数据回写 0/1，反哺下次出行）
+8 系统辅助能力（贯穿全程）
 ```
 
-采集产出与数据库默认落在 `~/Documents/travel_agent`（`--data-root` 可指定），本仓库不管产出。
+**实现状态：目前落地的是阶段 0 与阶段 1 的调研链路**（`skills/` 下的 5 个组件），阶段 2–8 仍是设计，尚无对应 skill。待做的能力缺口与迭代项记在 [docs/需求迭代.md](docs/需求迭代.md)。
+
+## 智能体
+
+一个 skill 一件事。两个**调研技能**面向阶段 0/1，各自只负责"出大纲、派子 agent、汇总、判缺口"，具体检索交给下面三个**小红书组件**。
+
+| skill | 干什么 | 对应阶段 | 产出 |
+| --- | --- | --- | --- |
+| [tour-overview](skills/tour-overview/) | 目的地全局认知、候选景点与参考线路比较 | 0 | 《游览总览》 |
+| [spot-research](skills/spot-research/) | 单个景点的点位、到达、住宿、票务与风险 | 1 | 《单景点游览参考》 |
+| [xhs-search](skills/xhs-search/) | 一问一答：搜索 → 粗筛 → 下载 → 理解 → 回答 | 0/1 的执行层 | 结论文档 + 缺口声明 |
+| [xhs-downloader](skills/xhs-downloader/) | 机械下载：搜关键词出候选、按清单下内容件 | 0/1 的执行层 | 笔记目录 + 索引 |
+| [xhs-digest](skills/xhs-digest/) | 单篇笔记理解（图文/视频/评论） | 0/1 的执行层 | `digest/` 存档 + 问题报告 |
+
+### tour-overview
+
+围绕用户的初步出行意向建立**目的地全局认知**：有哪些看点、整体如何游览、大致需要多久、当季是否值得去，以及天气、路况与人流的影响。输入是初步意向，输出《游览总览》Markdown，路线图与风景照直接在正文展示。
+
+它的边界划得很清楚——**不逐景点探查、不组织景点圈选、不编排逐日行程**。主 agent 生成调研大纲、汇总判断缺口，每个主题唤起一个子 agent 调 `xhs-search`。设计方案见 [docs/tour-overview-设计方案.md](docs/tour-overview-设计方案.md)。
+
+### spot-research
+
+围绕**单个景点**建立游览认知：有哪些点、何时去、怎样到达、游览强度与大致耗时、住在哪些区域方便，以及还需确认的事项。输入是景点名称加用户已表达的情况（一次只处理一个景点），输出《单景点游览参考》。
+
+支持**动态补充调研**：从已读笔记与评论里发现的新问题（导航易错、道路通行条件不明、名称冲突）即时调整大纲，不等初始主题跑完。纪律上禁止替用户确定路线、编排逐日行程或选定酒店。设计方案见 [docs/spot-research设计方案.md](docs/spot-research设计方案.md)。
+
+### xhs-search
+
+上面两个调研技能的执行层，也是这套东西里判断最密集的一环：**给一个问题与回答要求，在小红书上完成"搜索 → 粗筛 → 下载 → 理解 → 回答"的闭环**，输出结论文档与缺口声明。
+
+主从分工是它的核心：主 agent 只做决策（构造搜索词与条件、对照要求打勾、换词、停机、写输出），一切执行都派子 agent，原始页面内容与长文不进主上下文。自带停机准则（要求全覆盖 / 最多 6 轮搜索 / 单题约 10 篇软上限、20 篇硬停）。skill 本身**不带代码**，全靠调下面两个组件。设计方案见 [docs/xhs-search-设计方案.md](docs/xhs-search-设计方案.md)。
+
+### xhs-downloader
+
+小红书笔记的搜索与下载工具，两个入口：`discover.py` 搜一个关键词、施加筛选、输出候选清单（**不打开任何笔记**）；`download.py` 按清单把指定笔记的正文/封面/图片/视频/评论下到本地。
+
+**这个工具不做判断**——搜什么词、留哪几篇、什么时候停都是调用方的事，它只管把页面上的事实读准、把文件落对、把状态维护对。下载状态维护在笔记目录的文件里（`note.json` / `cover.*` / `images/` / `videos/` / `comments.json` / `downloads.json`）：**盘上已有的不再下，变了就整篇刷新**，所以原样重跑不会重复下载；sqlite 只存一份索引（`noteId` + 链接 + 更新时间 + 内容指纹），不存正文，也没有任何"已下载"标志位。
+
+入口是 [skills/xhs-downloader/SKILL.md](skills/xhs-downloader/SKILL.md)，重内容按需加载在旁边的 `references/` 下。设计方案见 [docs/xhs-downloader-设计方案.md](docs/xhs-downloader-设计方案.md)。
+
+### xhs-digest
+
+理解一篇**已下载**的笔记，提炼主题内对决策有价值的信息，生成本地 `digest/` 存档（`note.md` / `comment.md` / `image.md` / `video.md` + `assets/`）；给了问题时，另从存档生成问题级整理报告。
+
+两条不变量：**图片与视频只理解一次**（已有存档直接复用，不重跑管线）；**下载器保存的原始文件不改写**（中间产物只落 `scratch/`）。视频走本地 ASR（SenseVoice + VAD）转写并与字幕画面核对，风景画面单独成附录。设计方案见 [docs/xhs-digest-设计方案.md](docs/xhs-digest-设计方案.md)。
+
+## 依赖 chrome-agent
+
+**两个站点 skill 都不实现浏览器能力**：xhs-downloader 与 xhs-digest 假定 `chrome-agent` 命令可用（CLI + daemon + 已加载的扩展），只通过它的 `--json` 输出驱动浏览器，不 import 它的代码、也不建路径进它的目录。所有内容件都经浏览器取回，`--tab-id` 指定一个已登录小红书的标签页。
+
+浏览器这一侧出问题（扩展没连上、ref 失效、下载失败），去它的仓库查：**https://github.com/xunushan/chrome-agent**
+
+## 数据与产出
+
+采集产出与数据库默认落在 `~/Documents/travel_agent`（`--data-root` 可指定，也可用 `$XHS_DATA_ROOT`），本仓库不管产出。一次出行一个目录，例如 `research/gannan-2026-10/`：
+
+```text
+<root>/<trip_id>/
+├── xhs.db            # notes 索引 + digests 索引
+├── notes/<noteId>_<标题>/   # 笔记原件（正文/图/视频/评论）+ 它的 digest/
+├── answers/          # xhs-search 的结论文档
+├── overviews/<trip_id>/     # 《游览总览》
+└── runs/             # 每次调研的运行日志
+```
+
+## 开发
+
+```bash
+pip install -e ".[dev]"     # pytest + jsonschema
+python -m pytest -q         # 规则与产出合同的回归
+```
+
+## 说明文档
+
+- [docs/自驾游智能体工作流路径图.md](docs/自驾游智能体工作流路径图.md) —— 阶段 0–8 总纲
+- [docs/需求迭代.md](docs/需求迭代.md) —— 能力缺口与迭代项（含发笔记、直连下载、多信源等）
+- `docs/*-设计方案.md` —— 各 skill 的设计方案
+- [docs/图片OCR实现方案.md](docs/图片OCR实现方案.md)、[docs/视频理解方案调研.md](docs/视频理解方案调研.md)、[docs/HTML海报生成方案调研.md](docs/HTML海报生成方案调研.md) —— 技术选型调研
