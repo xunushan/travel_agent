@@ -12,6 +12,9 @@ venv/
 # 采集产出：落在调用方指定的目录，不进仓库
 outputs/
 
+# 调研工作区：含 xhs.db 与下载的笔记素材，体量大且属过程产物，不进仓库
+research/
+
 # xhs-digest 的 FunASR 依赖：二进制 3.5 MB + 模型 256 MB
 # 都由 scripts/setup-asr.sh 现场生成／下载，不进仓库
 skills/xhs-digest/bin/
