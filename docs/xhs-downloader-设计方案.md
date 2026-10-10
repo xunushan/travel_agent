@@ -27,7 +27,7 @@ discover 不开笔记，所以 `updatedAt` / `type` / `stats` 只对盘上已有
 
 **典型用法是两者串联**：discover 出候选后，紧接着对候选跑 download——比如调用方说"搜索'甘南小环线'，top-10，下载 note 和 cover"，智能体就跑 discover 再对候选跑 download（note,cover）。也可以只对给定笔记跑 download，比如"这几篇补 image、video、comment"。
 
-筛选项的可选值不写死词表，运行时从页面上读（`discover.py --list-filters`），调用方据此表达筛选意图；选项失效时显式报错，不悄悄退化成无筛选。页面上的维度与实测记录见 [`docs/xhs-筛选机制与实测.md`](xhs-筛选机制与实测.md)。
+筛选项的可选值不写死词表，运行时从页面上读（`discover.py --list-filters`），调用方据此表达筛选意图；选项失效时显式报错，不悄悄退化成无筛选。页面上有哪些维度、怎么挑见 [skills/xhs-downloader/references/flow.md](../skills/xhs-downloader/references/flow.md) 的 §1.1 与 §1.5。
 
 等结果渲染时不能只看"页面上有没有卡片"：`tabs navigate` 是异步的，紧随其后的快照还是被离开的那一页，而 explore 首页与搜索结果页是同一套卡片标记（`section.note-item`），于是"有卡片"会被首页满足，链接却都是 `/explore/` 开头的——一次根本没跑成的搜索会返回一份干净的空清单。所以判据必须是"落在本次关键词的搜索页上，且有卡片"，两个条件同时成立。
 

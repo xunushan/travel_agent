@@ -1,7 +1,7 @@
 # 完整流程
 
 搜一次 → 看一眼清单 → 下你要的几篇。第一步不打开任何笔记，第二步不开已经完整的笔记。
-出问题见 [pitfalls.md](pitfalls.md)；筛选的机制与实测记录见仓库 `docs/xhs-筛选机制与实测.md`。
+出问题见 [pitfalls.md](pitfalls.md)；筛选怎么读、怎么挑见下面 §1.1 与 §1.5。
 
 ```bash
 SITE="$HOME/.claude/skills/xhs-downloader"   # 源码仓库里换成 .../travel_agent/skills/xhs-downloader

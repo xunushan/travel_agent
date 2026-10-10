@@ -6,8 +6,6 @@
 只通过它的 `--json` 输出驱动浏览器。浏览器这一侧出问题，去 [chrome-agent](https://github.com/xunushan/chrome-agent)
 那个仓库查。
 
-站点 skill 由哪些文件组成、每个文件里必须有什么，见 [docs/site-skill-spec.md](docs/site-skill-spec.md)。
-
 ## skills/xhs-downloader
 
 小红书笔记的搜索与下载工具，两个入口：`discover.py` 搜一个关键词、施加筛选、输出候选清单

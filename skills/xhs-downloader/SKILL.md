@@ -34,7 +34,7 @@ chrome-agent tabs activate <tab-id> --json   # 采评论必须在前台
 | 报错、行为反常、结果不对 | [references/pitfalls.md](references/pitfalls.md) |
 | 改脚本、改选择器、改产出结构 | [references/files.md](references/files.md) |
 
-筛选的机制与实测记录不在 skill 里（仓库 `docs/xhs-筛选机制与实测.md`）；skill 只讲怎么操作。
+筛选项不写死词表，运行时从页面读；怎么读、怎么挑见 [references/flow.md](references/flow.md) 的 §1.1 与 §1.5。
 
 ## 命令
 
