@@ -9,6 +9,9 @@ venv/
 *.bak
 *.orig
 
+# 本地 harness 配置：.claude/skills 只是指向 skills/ 的软链接，真身在仓库内
+.claude/
+
 # 采集产出：落在调用方指定的目录，不进仓库
 outputs/
 
